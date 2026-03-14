@@ -23,4 +23,4 @@ You should receive an acknowledgement within **48 hours**. We will work with you
 
 ## Scope
 
-This security policy applies to the `modulex` Python SDK package. For vulnerabilities in the ModuleX API or platform itself, please contact contact@modulex.dev as well.
+This security policy applies to the `modulex-python` SDK package. For vulnerabilities in the ModuleX API or platform itself, please contact contact@modulex.dev as well.

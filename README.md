@@ -3,14 +3,14 @@
 The official Python SDK for the [ModuleX](https://modulex.dev) AI workflow orchestration platform.
 
 [![CI](https://github.com/ModuleXAI/modulex-python/actions/workflows/ci.yml/badge.svg)](https://github.com/ModuleXAI/modulex-python/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/modulex)](https://pypi.org/project/modulex/)
-[![Python](https://img.shields.io/pypi/pyversions/modulex)](https://pypi.org/project/modulex/)
-[![License](https://img.shields.io/github/license/modulex/modulex-python)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/modulex-python)](https://pypi.org/project/modulex-python/)
+[![Python](https://img.shields.io/pypi/pyversions/modulex-python)](https://pypi.org/project/modulex-python/)
+[![License](https://img.shields.io/github/license/ModuleXAI/modulex-python)](LICENSE)
 
 ## Installation
 
 ```bash
-pip install modulex
+pip install modulex-python
 ```
 
 ## Quick Start
