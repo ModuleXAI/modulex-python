@@ -1,0 +1,344 @@
+---
+title: "Executions"
+description: "Run workflows, stream real-time events, inspect state, resume from interrupts, and cancel runs"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## Run a Workflow
+
+The `run()` method supports four distinct modes. All modes return a `run_id` and `thread_id` you can use for streaming and state inspection.
+
+### Mode 1 — Run an Existing Workflow
+
+Execute a workflow stored in the database by its ID.
+
+<ParamField body="workflow_id" type="string" required>
+  UUID of the workflow to execute.
+</ParamField>
+
+<ParamField body="input" type="object" optional>
+  Input data passed to the workflow's entry node.
+</ParamField>
+
+<ParamField body="stream" type="boolean" optional>
+  Enable SSE streaming. Default: `True`. Set to `False` for synchronous execution.
+</ParamField>
+
+<ParamField body="ephemeral" type="boolean" optional>
+  Skip creating a chat record. Useful for background jobs. Default: `False`.
+</ParamField>
+
+<ParamField body="is_private" type="boolean" optional>
+  Restrict the resulting chat to the creator only. Default: `False`.
+</ParamField>
+
+```python
+run = await client.executions.run(
+    workflow_id="wf-uuid-here",
+    input={
+        "messages": [
+            {"role": "user", "content": "Summarize the latest sales report"}
+        ]
+    },
+    stream=True,
+    ephemeral=False,
+    is_private=False,
+)
+
+print(f"Run ID:    {run['run_id']}")
+print(f"Thread ID: {run['thread_id']}")
+print(f"Chat ID:   {run['chat_id']}")
+print(f"Source:    {run['workflow_source']}")  # "database"
+```
+
+---
+
+### Mode 2 — Run an Ad-Hoc Workflow
+
+Execute a workflow defined inline without saving it to the database first.
+
+```python
+run = await client.executions.run(
+    workflow={
+        "metadata": {"name": "Quick Summarizer", "version": "1.0"},
+        "config": {
+            "default_llm": {
+                "integration_name": "openai",
+                "provider_id": "openai",
+                "model_id": "gpt-4o-mini",
+                "temperature": 0.2,
+            }
+        },
+        "state_schema": {
+            "fields": {
+                "messages": {
+                    "type": "messages",
+                    "reducer": "add",
+                    "required": True,
+                    "default": None,
+                }
+            }
+        },
+        "nodes": [
+            {
+                "id": "summarizer",
+                "type": "llm",
+                "name": "Summarizer",
+                "enabled": True,
+                "x": 0,
+                "y": 0,
+                "llm_config": {
+                    "llm": {
+                        "integration_name": "openai",
+                        "provider_id": "openai",
+                        "model_id": "gpt-4o-mini",
+                        "temperature": 0.2,
+                    },
+                    "system_prompt": "Summarize the user's input in 3 bullet points.",
+                    "user_prompt": "{{input.messages}}",
+                },
+            }
+        ],
+        "edges": [],
+        "entry_point": "summarizer",
+    },
+    input={"messages": [{"role": "user", "content": "Here is the data: ..."}]},
+    stream=True,
+    ephemeral=True,
+)
+print(f"Ad-hoc run ID: {run['run_id']}")
+```
+
+---
+
+### Mode 3 — Direct LLM Call
+
+Send messages directly to an LLM without building a full workflow.
+
+<ParamField body="llm" type="object" required>
+  LLM configuration including `integration_name`, `provider_id`, `model_id`, and optionally `temperature` and `credential_id`.
+</ParamField>
+
+<ParamField body="knowledge_config" type="object" optional>
+  RAG configuration for augmenting the prompt with knowledge base context.
+</ParamField>
+
+```python
+run = await client.executions.run(
+    llm={
+        "integration_name": "anthropic",
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-4-20250514",
+        "temperature": 0.4,
+        "credential_id": "cred-uuid-here",  # optional
+    },
+    input={
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What is the capital of France?"},
+        ]
+    },
+    knowledge_config={
+        "knowledge_base_id": "kb-uuid-here",
+        "top_k": 5,
+        "min_score": 0.3,
+    },
+    stream=True,
+    ephemeral=False,
+)
+print(f"LLM run: {run['run_id']} — source: {run['workflow_source']}")
+```
+
+---
+
+### Mode 4 — Run a System Workflow
+
+Execute a built-in system workflow by name.
+
+<ParamField body="system_workflow" type="string" required>
+  Name of the system workflow to execute.
+</ParamField>
+
+```python
+run = await client.executions.run(
+    system_workflow="workflow_name",
+    input={"key": "value"},
+    config={},
+)
+print(f"System workflow run: {run['run_id']}")
+print(f"Source: {run['workflow_source']}")  # "system:workflow_name"
+```
+
+---
+
+## Stream Events (SSE)
+
+Listen to real-time execution events via Server-Sent Events. This is the primary way to receive node-level progress, interrupts, and the final result.
+
+<Note>
+  Call `listen()` after `run()` using the `run_id` from the run response. Streaming begins immediately — events are buffered server-side so you will not miss events even with a slight delay.
+</Note>
+
+```python
+from modulex import StreamError
+
+run = await client.executions.run(
+    workflow_id="wf-uuid-here",
+    input={"messages": [{"role": "user", "content": "Analyze this dataset"}]},
+    stream=True,
+)
+
+async for event in client.executions.listen(run_id=run["run_id"]):
+    if event.event == "metadata":
+        print(f"Workflow: {event.data['workflow_name']} v{event.data['workflow_version']}")
+        print(f"Nodes:    {[n['id'] for n in event.data.get('nodes', [])]}")
+
+    elif event.event == "node_update":
+        node_id = event.data["node_id"]
+        status = event.data["status"]   # "started" | "completed" | "error"
+        duration = event.data.get("execution_time_ms", 0)
+        print(f"  [{status.upper()}] {node_id} ({duration}ms)")
+        if status == "completed" and event.data.get("output"):
+            print(f"    Output: {event.data['output']}")
+
+    elif event.event == "interrupt":
+        print(f"INTERRUPT: {event.data['message']}")
+        print(f"  Node:    {event.data['node_id']}")
+        print(f"  Resume instructions: {event.data.get('resume_instructions')}")
+        # Handle resume — see Resume section below
+
+    elif event.event == "done":
+        final = event.data
+        print(f"Completed in {final['total_execution_time_ms']}ms")
+        print(f"Steps executed: {final['steps_executed']}")
+        print(f"Final state:    {final['final_state']}")
+        break
+
+    elif event.event == "error":
+        raise StreamError(
+            f"Workflow failed: {event.data['error_message']} "
+            f"(type: {event.data['error_type']}, node: {event.data.get('node_id')})"
+        )
+```
+
+---
+
+## Get Execution State
+
+Retrieve the current state of a workflow thread, including pending nodes and checkpoint data.
+
+<ParamField path="thread_id" type="string" required>
+  Thread ID returned from `run()` or `resume()`.
+</ParamField>
+
+```python
+state = await client.executions.get_state(thread_id=run["thread_id"])
+
+print(f"Thread:    {state['thread_id']}")
+print(f"Run ID:    {state['run_id']}")
+print(f"Next node: {state['next']}")         # List of pending node IDs
+print(f"State:     {state['state']}")
+print(f"Pending writes: {state['pending_writes']}")
+```
+
+---
+
+## Resume from Interrupt
+
+Resume a paused workflow after an interrupt node has collected human input.
+
+<ParamField path="thread_id" type="string" required>
+  Thread ID of the paused workflow.
+</ParamField>
+
+<ParamField body="run_id" type="string" required>
+  Run ID of the paused execution.
+</ParamField>
+
+<ParamField body="resume_value" type="any" required>
+  The value to inject into the interrupt node. Shape depends on the interrupt's `resume_schema`.
+</ParamField>
+
+```python
+run = await client.executions.run(
+    workflow_id="wf-with-interrupt",
+    input={"messages": [{"role": "user", "content": "Process my order"}]},
+    stream=True,
+)
+
+thread_id = run["thread_id"]
+run_id = run["run_id"]
+
+# Wait for interrupt event
+async for event in client.executions.listen(run_id=run_id):
+    if event.event == "interrupt":
+        print(f"Paused: {event.data['message']}")
+        break
+
+# Resume with user-provided value
+resumed = await client.executions.resume(
+    thread_id=thread_id,
+    run_id=run_id,
+    resume_value={"approved": True, "notes": "Looks good, proceed"},
+    workflow_id="wf-with-interrupt",
+    stream=True,
+)
+
+# Listen to resumed run
+async for event in client.executions.listen(run_id=resumed["run_id"]):
+    if event.event == "done":
+        print("Workflow completed after resume")
+        break
+    elif event.event == "node_update":
+        print(f"  {event.data['node_id']}: {event.data['status']}")
+```
+
+---
+
+## Cancel Execution
+
+Request cancellation of a running workflow.
+
+<ParamField path="run_id" type="string" required>
+  UUID of the run to cancel.
+</ParamField>
+
+<ParamField body="reason" type="string" optional>
+  Human-readable reason for the cancellation.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    result = await client.executions.cancel(
+        run_id="run-uuid-here",
+        reason="User requested cancellation",
+    )
+    print(f"Status:  {result['status']}")    # "cancellation_requested"
+    print(f"Message: {result['message']}")
+except NotFoundError:
+    print("Run not found or already completed")
+```
+
+<Tip>
+  Cancellation is asynchronous — the run may complete a few more steps before stopping. Poll `get_state()` to confirm the run has ended.
+</Tip>

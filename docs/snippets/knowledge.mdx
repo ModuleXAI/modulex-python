@@ -1,0 +1,449 @@
+---
+title: "Knowledge"
+description: "Create and query knowledge bases, upload documents, and perform semantic and hybrid search for RAG pipelines"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## List Knowledge Bases
+
+<ParamField query="status" type="string" optional>
+  Filter by status (e.g., `"active"`, `"archived"`).
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Items to return (1–500). Default: `100`.
+</ParamField>
+
+<ParamField query="offset" type="integer" optional>
+  Items to skip for pagination. Default: `0`.
+</ParamField>
+
+```python
+result = await client.knowledge.list()
+for kb in result["knowledge_bases"]:
+    print(f"{kb['name']} — {kb['status']} — {kb.get('document_count', 0)} docs")
+
+# Filter to active only
+active = await client.knowledge.list(status="active", limit=50)
+```
+
+---
+
+## Create Knowledge Base
+
+<ParamField body="name" type="string" required>
+  Display name for the knowledge base (1–255 characters).
+</ParamField>
+
+<ParamField body="embedding_config" type="object" optional>
+  Embedding model configuration. If omitted, the platform default is used.
+</ParamField>
+
+<ParamField body="chunking_config" type="object" optional>
+  Document chunking strategy and parameters.
+</ParamField>
+
+```python
+from modulex import ValidationError
+
+try:
+    kb = await client.knowledge.create(
+        name="Product Documentation",
+        description="Official product docs and release notes",
+        embedding_config={
+            "provider_credential_id": "cred-uuid-here",
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimension": 1536,
+        },
+        chunking_config={
+            "strategy": "recursive",
+            "chunk_size": 1000,
+            "overlap": 200,
+            "separators": ["\n\n", "\n", ". "],
+        },
+    )
+    print(f"Created KB: {kb['id']}")
+except ValidationError as e:
+    print(f"Invalid config: {e.message}")
+```
+
+---
+
+## Get Knowledge Base
+
+```python
+from modulex import NotFoundError
+
+try:
+    kb = await client.knowledge.get("kb-uuid-here")
+    print(f"Name:       {kb['name']}")
+    print(f"Status:     {kb['status']}")
+    print(f"Documents:  {kb.get('document_count', 0)}")
+    print(f"Embedding:  {kb['embedding_config']['model']}")
+except NotFoundError:
+    print("Knowledge base not found")
+```
+
+---
+
+## Update Knowledge Base
+
+```python
+updated = await client.knowledge.update(
+    "kb-uuid-here",
+    name="Product Documentation v2",
+    description="Updated with API reference and tutorials",
+    chunking_config={
+        "strategy": "recursive",
+        "chunk_size": 800,
+        "overlap": 150,
+    },
+)
+```
+
+---
+
+## Delete Knowledge Base
+
+<ParamField query="delete_files" type="boolean" optional>
+  Also delete the underlying stored files. Default: `True`.
+</ParamField>
+
+<Warning>
+  Deletion is permanent and cannot be undone. All documents and their vector embeddings will be removed.
+</Warning>
+
+```python
+await client.knowledge.delete("kb-uuid-here", delete_files=True)
+print("Knowledge base deleted")
+```
+
+---
+
+## Archive Knowledge Base
+
+Set a knowledge base to archived status without deleting it.
+
+```python
+result = await client.knowledge.archive("kb-uuid-here")
+print(f"Archived: {result['status']}")
+```
+
+---
+
+## Knowledge Base Stats
+
+Retrieve organization-wide statistics across all knowledge bases.
+
+```python
+stats = await client.knowledge.stats()
+print(f"Total knowledge bases: {stats.get('total_knowledge_bases')}")
+print(f"Total documents:       {stats.get('total_documents')}")
+print(f"Total chunks:          {stats.get('total_chunks')}")
+```
+
+---
+
+## List Documents
+
+<ParamField path="knowledge_base_id" type="string" required>
+  UUID of the knowledge base.
+</ParamField>
+
+<ParamField query="status" type="string" optional>
+  Filter by processing status: `"pending"`, `"processing"`, `"completed"`, `"failed"`.
+</ParamField>
+
+```python
+result = await client.knowledge.list_documents(
+    "kb-uuid-here",
+    status="completed",
+    limit=50,
+)
+for doc in result["documents"]:
+    print(f"  {doc['filename']} — {doc['status']} — {doc.get('chunk_count', 0)} chunks")
+```
+
+---
+
+## Upload Document
+
+<Note>
+  Supported file types: PDF, DOCX, DOC, TXT, MD, HTML, CSV, JSON, XLSX, PPTX. Maximum file size: 50 MB.
+</Note>
+
+### From a File Path
+
+```python
+doc = await client.knowledge.upload_document(
+    knowledge_base_id="kb-uuid-here",
+    file_path="/path/to/annual-report-2025.pdf",
+    metadata={
+        "department": "finance",
+        "year": 2025,
+        "confidential": False,
+    },
+)
+print(f"Document ID: {doc['id']}")
+print(f"Status:      {doc['status']}")  # "pending" initially
+print(f"Filename:    {doc['filename']}")
+```
+
+### From a File Object
+
+```python
+with open("/path/to/engineering-specs.docx", "rb") as f:
+    doc = await client.knowledge.upload_document(
+        knowledge_base_id="kb-uuid-here",
+        file=f,
+        filename="engineering-specs.docx",
+        metadata={"team": "engineering", "version": "3.2"},
+    )
+print(f"Uploaded: {doc['id']}")
+```
+
+---
+
+## Get Document
+
+```python
+document = await client.knowledge.get_document(
+    knowledge_base_id="kb-uuid-here",
+    document_id="doc-uuid-here",
+)
+print(f"Filename:     {document['filename']}")
+print(f"Status:       {document['status']}")
+print(f"Chunk count:  {document.get('chunk_count', 0)}")
+print(f"Uploaded at:  {document['created_at']}")
+```
+
+---
+
+## Document Status
+
+Poll the processing status of an uploaded document.
+
+```python
+import asyncio
+
+async def wait_for_processing(kb_id: str, doc_id: str):
+    while True:
+        status = await client.knowledge.document_status(kb_id, doc_id)
+        print(f"Status: {status['status']}")
+
+        if status["status"] == "completed":
+            print(f"Processing complete — {status.get('chunk_count', 0)} chunks created")
+            return status
+        elif status["status"] == "failed":
+            raise Exception(f"Processing failed: {status.get('error')}")
+
+        await asyncio.sleep(3)  # Poll every 3 seconds
+
+status = await wait_for_processing("kb-uuid-here", "doc-uuid-here")
+```
+
+---
+
+## Delete Document
+
+<ParamField query="delete_file" type="boolean" optional>
+  Delete the underlying stored file. Default: `True`.
+</ParamField>
+
+```python
+await client.knowledge.delete_document(
+    knowledge_base_id="kb-uuid-here",
+    document_id="doc-uuid-here",
+    delete_file=True,
+)
+print("Document deleted")
+```
+
+---
+
+## Retry Failed Document
+
+Retry processing for a document that failed during ingestion.
+
+```python
+result = await client.knowledge.retry_document(
+    knowledge_base_id="kb-uuid-here",
+    document_id="doc-uuid-here",
+)
+print(f"Retry started: {result['status']}")
+```
+
+---
+
+## Document Chunks
+
+Retrieve the individual text chunks generated from a document.
+
+<ParamField query="limit" type="integer" optional>
+  Chunks to return (1–500). Default: `100`.
+</ParamField>
+
+```python
+result = await client.knowledge.document_chunks(
+    knowledge_base_id="kb-uuid-here",
+    document_id="doc-uuid-here",
+    limit=20,
+)
+print(f"Total chunks: {result['count']}")
+for chunk in result["chunks"]:
+    print(f"  Chunk {chunk.get('index', '?')}: {chunk['content'][:80]}...")
+```
+
+---
+
+## Semantic Search
+
+Search a knowledge base using semantic (vector) similarity.
+
+<ParamField body="query" type="string" required>
+  Natural language search query.
+</ParamField>
+
+<ParamField body="top_k" type="integer" optional>
+  Number of results to return (1–50). Default: `5`.
+</ParamField>
+
+<ParamField body="min_score" type="float" optional>
+  Minimum similarity score (0.0–1.0). Default: `0.0`.
+</ParamField>
+
+<ParamField body="filters" type="object" optional>
+  Metadata filters to apply before ranking.
+</ParamField>
+
+```python
+results = await client.knowledge.search(
+    knowledge_base_id="kb-uuid-here",
+    query="How do I configure webhook retry logic?",
+    top_k=5,
+    min_score=0.4,
+    filters={"department": "engineering"},
+)
+for match in results["results"]:
+    print(f"Score: {match['score']:.3f} — {match['content'][:100]}")
+    print(f"  Source: {match.get('metadata', {}).get('filename')}")
+```
+
+---
+
+## Multi-Knowledge-Base Search
+
+Search across multiple knowledge bases simultaneously.
+
+```python
+results = await client.knowledge.multi_search(
+    knowledge_base_ids=[
+        "kb-uuid-1",
+        "kb-uuid-2",
+        "kb-uuid-3",
+    ],
+    query="quarterly revenue projections",
+    top_k=10,
+    min_score=0.3,
+)
+for match in results["results"]:
+    print(f"Score: {match['score']:.3f} — KB: {match.get('knowledge_base_id')}")
+    print(f"  {match['content'][:100]}")
+```
+
+---
+
+## Hybrid Search
+
+Combine keyword (BM25) and semantic search for better recall on exact-match queries.
+
+<ParamField body="keyword_weight" type="float" optional>
+  Weight for keyword search component (0.0–1.0). Default: `0.3`.
+</ParamField>
+
+<ParamField body="semantic_weight" type="float" optional>
+  Weight for semantic search component (0.0–1.0). Default: `0.7`.
+</ParamField>
+
+```python
+results = await client.knowledge.hybrid_search(
+    knowledge_base_id="kb-uuid-here",
+    query="API rate limit 429 error",
+    top_k=8,
+    keyword_weight=0.4,
+    semantic_weight=0.6,
+    min_score=0.2,
+)
+for match in results["results"]:
+    print(f"Score: {match['score']:.3f} — {match['content'][:100]}")
+```
+
+---
+
+## Retrieve Context (RAG)
+
+Retrieve formatted, token-budgeted context ready to inject into an LLM prompt.
+
+<ParamField body="max_tokens" type="integer" optional>
+  Maximum context length in tokens (100–10000). Default: `2000`.
+</ParamField>
+
+<ParamField body="top_k" type="integer" optional>
+  Maximum number of chunks to retrieve (1–50). Default: `10`.
+</ParamField>
+
+<ParamField body="min_score" type="float" optional>
+  Minimum relevance score (0.0–1.0). Default: `0.3`.
+</ParamField>
+
+```python
+context = await client.knowledge.retrieve_context(
+    knowledge_base_id="kb-uuid-here",
+    query="How does the billing cycle work?",
+    max_tokens=3000,
+    top_k=10,
+    min_score=0.3,
+)
+
+# Inject directly into an LLM prompt
+formatted_context = context["context"]
+print(f"Context length: approx {len(formatted_context.split())} words")
+
+prompt = f"""Answer the user's question based on the provided context.
+
+Context:
+{formatted_context}
+
+Question: How does the billing cycle work?"""
+```
+
+---
+
+## Supported File Types
+
+Retrieve the list of file types and size limits for document uploads.
+
+```python
+info = await client.knowledge.supported_file_types()
+print(f"Supported types: {', '.join(info['supported_types'])}")
+print(f"Max file size:   {info['max_file_size_mb']} MB")
+```

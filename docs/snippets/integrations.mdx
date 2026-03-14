@@ -1,0 +1,229 @@
+---
+title: "Integrations"
+description: "Browse available tool integrations, LLM providers, and knowledge providers"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  Integration catalog data is cached for 10 minutes in Redis. Use these endpoints to populate the workflow builder's integration palette and credential forms.
+</Note>
+
+---
+
+## Browse All Integrations
+
+Search and filter across all integration types — tools, LLM providers, and knowledge providers.
+
+<ParamField query="category" type="string" optional>
+  Filter by category (e.g., `"productivity"`, `"search"`, `"database"`).
+</ParamField>
+
+<ParamField query="type" type="string" optional>
+  Filter by type: `"tool"`, `"llm_provider"`, or `"knowledge_provider"`.
+</ParamField>
+
+<ParamField query="auth_type" type="string" optional>
+  Filter by auth mechanism: `"api_key"`, `"oauth2"`, `"bearer_token"`, `"modulex_key"`.
+</ParamField>
+
+<ParamField query="search" type="string" optional>
+  Full-text search across integration names and descriptions.
+</ParamField>
+
+<ParamField query="include_details" type="boolean" optional>
+  Include actions, models, and auth schemas in the response. Default: `True`.
+</ParamField>
+
+<ParamField query="page" type="integer" optional>
+  Page number. Default: `1`.
+</ParamField>
+
+<ParamField query="page_size" type="integer" optional>
+  Items per page (1–100). Default: `50`.
+</ParamField>
+
+```python
+# Browse all integrations
+result = await client.integrations.browse()
+print(f"Total integrations: {result['total']}")
+
+for integration in result["integrations"]:
+    print(f"  {integration['name']} ({integration['type']})")
+
+# Search for database integrations
+db_integrations = await client.integrations.browse(
+    search="database",
+    type="tool",
+    page=1,
+    page_size=20,
+)
+
+# Browse OAuth2 tools only
+oauth_tools = await client.integrations.browse(
+    type="tool",
+    auth_type="oauth2",
+    include_details=False,
+)
+
+# Browse without full details for faster load
+catalog = await client.integrations.browse(include_details=False, page_size=100)
+names = [i["name"] for i in catalog["integrations"]]
+print(f"Available integrations: {', '.join(names[:10])}")
+```
+
+---
+
+## List Tool Integrations
+
+Retrieve all tool integrations (search, database, email, calendar, etc.).
+
+<ParamField query="category" type="string" optional>
+  Filter tools by category.
+</ParamField>
+
+```python
+tools = await client.integrations.tools()
+print(f"Total tool integrations: {len(tools['integrations'])}")
+
+for tool in tools["integrations"]:
+    print(f"  {tool['name']} — {tool.get('description', 'No description')}")
+
+# Filter by category
+search_tools = await client.integrations.tools(category="search")
+for tool in search_tools["integrations"]:
+    print(f"  {tool['name']}")
+```
+
+---
+
+## Get Tool Integration Detail
+
+Retrieve detailed information about a specific tool integration, including available actions and authentication schemas.
+
+<ParamField path="integration_name" type="string" required>
+  Integration name (e.g., `"tavily"`, `"github"`, `"slack"`).
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    detail = await client.integrations.tool_detail("tavily")
+    print(f"Name:        {detail['name']}")
+    print(f"Description: {detail.get('description')}")
+    print(f"Auth types:  {detail.get('supported_auth_types', [])}")
+
+    # List available actions
+    for action in detail.get("actions", []):
+        print(f"  Action: {action['name']} — {action.get('description', '')}")
+        # See required parameters for each action
+        for param in action.get("parameters", []):
+            required = " (required)" if param.get("required") else ""
+            print(f"    - {param['name']}: {param['type']}{required}")
+except NotFoundError:
+    print("Integration not found")
+```
+
+---
+
+## List LLM Providers
+
+Retrieve all available LLM provider integrations.
+
+<ParamField query="category" type="string" optional>
+  Filter LLM providers by category.
+</ParamField>
+
+```python
+providers = await client.integrations.llm_providers()
+print(f"Available LLM providers: {len(providers['integrations'])}")
+
+for provider in providers["integrations"]:
+    print(f"  {provider['name']}")
+    for model in provider.get("models", [])[:3]:
+        print(f"    - {model['id']}: {model.get('display_name', model['id'])}")
+```
+
+---
+
+## Get LLM Provider Detail
+
+Retrieve full details for a specific LLM provider, including all available models and auth schemas.
+
+<ParamField path="provider_name" type="string" required>
+  Provider name (e.g., `"openai"`, `"anthropic"`, `"google"`, `"xai"`).
+</ParamField>
+
+```python
+try:
+    provider = await client.integrations.llm_provider_detail("openai")
+    print(f"Provider:    {provider['name']}")
+    print(f"Auth types:  {provider.get('supported_auth_types', [])}")
+
+    print("Available models:")
+    for model in provider.get("models", []):
+        print(f"  {model['id']} — context: {model.get('context_length', 'N/A')} tokens")
+        capabilities = model.get("capabilities", [])
+        if capabilities:
+            print(f"    Capabilities: {', '.join(capabilities)}")
+except NotFoundError:
+    print("LLM provider not found")
+```
+
+---
+
+## List Knowledge Providers
+
+Retrieve all available knowledge base provider integrations (vector databases, document stores).
+
+<ParamField query="category" type="string" optional>
+  Filter knowledge providers by category.
+</ParamField>
+
+```python
+providers = await client.integrations.knowledge_providers()
+print(f"Available knowledge providers: {len(providers['integrations'])}")
+
+for provider in providers["integrations"]:
+    print(f"  {provider['name']} — {provider.get('description', '')}")
+```
+
+---
+
+## Get Knowledge Provider Detail
+
+Retrieve full configuration details for a specific knowledge provider.
+
+<ParamField path="provider_name" type="string" required>
+  Provider name (e.g., `"pinecone"`, `"qdrant"`, `"weaviate"`).
+</ParamField>
+
+```python
+try:
+    provider = await client.integrations.knowledge_provider_detail("pinecone")
+    print(f"Provider:        {provider['name']}")
+    print(f"Auth types:      {provider.get('supported_auth_types', [])}")
+    print(f"Configuration:   {provider.get('config_schema', {})}")
+except NotFoundError:
+    print("Knowledge provider not found")
+```
+
+<Tip>
+  Use `knowledge_provider_detail()` to retrieve the auth schema before creating credentials for a knowledge provider. This tells you exactly which fields are required in `auth_data`.
+</Tip>

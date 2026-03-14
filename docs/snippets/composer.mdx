@@ -1,0 +1,267 @@
+---
+title: "Composer"
+description: "AI-powered workflow builder — modify workflows through natural language conversation"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  The Composer uses a LangGraph-based AI agent to modify workflow schemas through natural language instructions. Each conversation is a `ComposerChat` session tied to a specific workflow.
+</Note>
+
+---
+
+## Start a New Composer Chat
+
+Begin a new Composer session for a workflow. The AI agent receives your message and begins modifying the workflow schema.
+
+<ParamField body="workflow_id" type="string" required>
+  UUID of the workflow to edit. Used to start a new session.
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  Natural language instruction for the AI agent (e.g., `"Add an email notification node after the LLM"`).
+</ParamField>
+
+<ParamField body="llm" type="object" optional>
+  Override the LLM used by the Composer agent. Defaults to the platform default.
+</ParamField>
+
+```python
+response = await client.composer.chat(
+    workflow_id="wf-uuid-here",
+    message="Add a Slack notification node that sends the LLM output to #alerts",
+    llm={
+        "integration_name": "anthropic",
+        "provider_id": "anthropic",
+        "model_id": "claude-sonnet-4-20250514",
+    },
+)
+
+print(f"Composer chat ID: {response['composer_chat_id']}")
+print(f"Workflow ID:      {response['workflow_id']}")
+print(f"Run ID:           {response['run_id']}")
+print(f"Status:           {response['status']}")  # "running"
+print(f"Stream URL:       {response['stream_url']}")
+```
+
+---
+
+## Continue an Existing Session
+
+Continue a conversation in an already-open Composer session.
+
+```python
+# Continue from a previous session
+continued = await client.composer.chat(
+    composer_chat_id="composer-chat-uuid-here",
+    message="Now add error handling — if the Slack notification fails, retry 3 times",
+)
+print(f"Run ID: {continued['run_id']}")
+```
+
+---
+
+## Get Composer Chat
+
+Retrieve the current state of a Composer chat session, including messages and pending changes.
+
+<ParamField path="composer_chat_id" type="string" required>
+  UUID of the Composer chat session.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    chat = await client.composer.get("composer-chat-uuid-here")
+    print(f"Workflow ID:       {chat['workflow_id']}")
+    print(f"Is running:        {chat.get('is_running', False)}")
+    print(f"Has pending changes: {chat.get('has_pending_changes', False)}")
+    for msg in chat.get("messages", []):
+        role = msg["role"].upper()
+        content = str(msg.get("content", ""))[:120]
+        print(f"  [{role}] {content}")
+except NotFoundError:
+    print("Composer chat not found")
+```
+
+---
+
+## Listen to Composer Events (SSE)
+
+Stream real-time events from the Composer agent — tool calls, workflow changes, and the final response.
+
+<ParamField path="composer_chat_id" type="string" required>
+  UUID of the Composer chat session.
+</ParamField>
+
+<ParamField path="run_id" type="string" required>
+  Run ID from the `chat()` response.
+</ParamField>
+
+```python
+from modulex import StreamError
+
+response = await client.composer.chat(
+    workflow_id="wf-uuid-here",
+    message="Add a conditional node that routes based on sentiment score",
+)
+
+composer_chat_id = response["composer_chat_id"]
+run_id = response["run_id"]
+
+async for event in client.composer.listen(
+    composer_chat_id=composer_chat_id,
+    run_id=run_id,
+):
+    if event.event == "metadata":
+        print(f"Session: {event.data.get('composer_chat_id')}")
+
+    elif event.event == "tool_call":
+        tool = event.data.get("tool_name", "unknown")
+        print(f"  Calling tool: {tool}")
+        if event.data.get("input"):
+            print(f"    Input: {str(event.data['input'])[:80]}")
+
+    elif event.event == "tool_result":
+        print(f"  Tool result: {str(event.data.get('result', ''))[:80]}")
+
+    elif event.event == "workflow_change":
+        change_type = event.data.get("change_type")
+        print(f"  Workflow modified: {change_type}")
+        # The schema has been updated — pending save
+
+    elif event.event == "response_chunk":
+        # Stream the text response incrementally
+        chunk = event.data.get("chunk", "")
+        print(chunk, end="", flush=True)
+
+    elif event.event == "subagent_start":
+        print(f"\n  Sub-agent started: {event.data.get('name')}")
+
+    elif event.event == "interrupt":
+        print(f"\nINTERRUPT: {event.data.get('message')}")
+        # Provide input via another chat() call
+
+    elif event.event == "done":
+        print(f"\nComposer run complete")
+        break
+
+    elif event.event == "error":
+        raise StreamError(f"Composer error: {event.data.get('error_message')}")
+```
+
+---
+
+## Save Changes
+
+Apply the pending workflow changes created during the Composer session to the live workflow schema.
+
+<ParamField path="composer_chat_id" type="string" required>
+  UUID of the Composer chat session with pending changes.
+</ParamField>
+
+<Warning>
+  Saving overwrites the current workflow schema. Ensure you have reviewed the pending changes via `get()` before saving.
+</Warning>
+
+```python
+result = await client.composer.save("composer-chat-uuid-here")
+print(f"Changes applied:   {result.get('success')}")
+print(f"Workflow updated:  {result.get('workflow_id')}")
+```
+
+---
+
+## Revert Changes
+
+Discard all pending changes from the current Composer session without modifying the workflow.
+
+```python
+result = await client.composer.revert("composer-chat-uuid-here")
+print(f"Reverted: {result.get('success')}")
+print(f"Message:  {result.get('message')}")
+```
+
+---
+
+## Workflow Composer History
+
+Retrieve previous Composer chat sessions for a workflow.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Number of sessions to return (1–50). Default: `10`.
+</ParamField>
+
+```python
+history = await client.composer.history(
+    workflow_id="wf-uuid-here",
+    limit=10,
+)
+for session in history.get("sessions", []):
+    print(f"  {session['id']} — {session['created_at'][:10]} — {len(session.get('messages', []))} messages")
+```
+
+---
+
+## Delete Composer Chat
+
+Delete a Composer chat session.
+
+<ParamField path="composer_chat_id" type="string" required>
+  UUID of the Composer chat session.
+</ParamField>
+
+<ParamField query="permanent" type="boolean" optional>
+  Permanently delete instead of soft-deleting. Default: `False`.
+</ParamField>
+
+```python
+await client.composer.delete("composer-chat-uuid-here", permanent=False)
+print("Composer chat deleted")
+```
+
+---
+
+## Get Composer Status
+
+Check whether a Composer session is currently running and whether it has unsaved changes.
+
+```python
+status = await client.composer.status("composer-chat-uuid-here")
+print(f"Is running:           {status['is_running']}")
+print(f"Running ID:           {status.get('running_id')}")
+print(f"Has pending changes:  {status['has_pending_changes']}")
+print(f"Run status:           {status.get('run_status')}")
+```
+
+---
+
+## Cancel Composer Run
+
+Cancel the currently running Composer agent execution.
+
+```python
+result = await client.composer.cancel("composer-chat-uuid-here")
+print(f"Cancelled: {result.get('success')}")
+```

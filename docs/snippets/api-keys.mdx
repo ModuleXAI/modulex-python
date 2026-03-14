@@ -1,0 +1,151 @@
+---
+title: "API Keys"
+description: "Create and manage programmatic API keys for the ModuleX platform"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  API keys use the prefix `mx_live_`. The full key value is returned **only once** at creation time — store it securely immediately.
+</Note>
+
+---
+
+## Create API Key
+
+Generate a new API key scoped to a user or optionally to a specific organization.
+
+<ParamField body="name" type="string" required>
+  A descriptive label for this key (1–255 characters).
+</ParamField>
+
+<ParamField body="organization_id" type="string" optional>
+  Scope the key to a specific organization. The user must be a member of that organization.
+</ParamField>
+
+<ParamField body="expires_at" type="string" optional>
+  ISO 8601 datetime after which the key is automatically revoked. Omit for a non-expiring key.
+</ParamField>
+
+<ParamField body="rate_limit_per_minute" type="integer" optional>
+  Requests per minute allowed for this key. Range: 1–1000. Default: `60`.
+</ParamField>
+
+<Warning>
+  Copy the `key` field from the response immediately — it is shown **only once** and cannot be retrieved again.
+</Warning>
+
+```python
+from modulex import ValidationError
+
+# Basic key — no expiry, default rate limit
+key = await client.api_keys.create(name="CI Pipeline Key")
+print(f"Key value (save this now!): {key['key']}")
+print(f"Key ID:  {key['id']}")
+print(f"Hint:    {key['key_hint']}")
+
+# Scoped + expiring key with custom rate limit
+scoped_key = await client.api_keys.create(
+    name="Production Integration",
+    organization_id="org-uuid-here",
+    expires_at="2027-01-01T00:00:00Z",
+    rate_limit_per_minute=200,
+)
+print(f"Scoped to org: {scoped_key['organization_id']}")
+print(f"Expires:       {scoped_key['expires_at']}")
+print(f"Rate limit:    {scoped_key['rate_limit_per_minute']} req/min")
+```
+
+---
+
+## List API Keys
+
+Retrieve all API keys belonging to the authenticated user.
+
+<ParamField query="include_revoked" type="boolean" optional>
+  Set to `True` to include revoked keys in the response. Default: `False`.
+</ParamField>
+
+```python
+# Active keys only
+result = await client.api_keys.list()
+for k in result["api_keys"]:
+    print(f"{k['name']} — hint: {k['key_hint']} — created: {k['created_at']}")
+
+# Include revoked keys
+all_keys = await client.api_keys.list(include_revoked=True)
+for k in all_keys["api_keys"]:
+    status = "revoked" if k.get("revoked_at") else "active"
+    print(f"{k['name']} [{status}]")
+```
+
+---
+
+## Get API Key
+
+Retrieve details for a single API key by its UUID.
+
+<ParamField path="key_id" type="string" required>
+  UUID of the API key to retrieve.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    key = await client.api_keys.get("key-uuid-here")
+    print(f"Name:        {key['name']}")
+    print(f"Hint:        {key['key_hint']}")
+    print(f"Rate limit:  {key['rate_limit_per_minute']} req/min")
+    print(f"Expires:     {key.get('expires_at', 'Never')}")
+    print(f"Org scoped:  {key.get('organization_id') or 'No'}")
+except NotFoundError:
+    print("API key not found")
+```
+
+---
+
+## Revoke API Key
+
+Permanently revoke an API key. This action cannot be undone.
+
+<ParamField path="key_id" type="string" required>
+  UUID of the API key to revoke.
+</ParamField>
+
+<Warning>
+  Revoking a key is irreversible. Any services or integrations using this key will immediately lose access.
+</Warning>
+
+```python
+from modulex import NotFoundError, RateLimitError
+
+key_id = "key-uuid-here"
+
+try:
+    result = await client.api_keys.revoke(key_id)
+    print(f"Key revoked: {result['message']}")
+except NotFoundError:
+    print("Key not found or already revoked")
+except RateLimitError as e:
+    print(f"Rate limited — retry after {e.retry_after}s")
+```
+
+<Tip>
+  Before revoking a key in production, rotate it by creating a replacement key first, updating your services, and then revoking the old one.
+</Tip>

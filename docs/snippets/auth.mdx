@@ -1,0 +1,157 @@
+---
+title: "Auth"
+description: "Retrieve user identity, manage organization memberships, and handle invitations"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  The `organization_id` at client level acts as a default for all organization-scoped requests. You can override it per-method when needed.
+</Note>
+
+---
+
+## Get Current User
+
+Retrieve the authenticated user's profile and organization memberships.
+
+```python
+me = await client.auth.me()
+
+print(me["id"])          # "a1b2c3d4-..."
+print(me["email"])       # "alice@acme.com"
+print(me["username"])    # "alice"
+print(me["role"])        # "USER" | "ADMIN" | "SUPER_ADMIN"
+print(me["organization_ids"])         # ["org-uuid-1", "org-uuid-2"]
+print(me["primary_organization_id"])  # "org-uuid-1"
+```
+
+---
+
+## List Organizations
+
+List all organizations the authenticated user belongs to, with an optional role filter.
+
+<ParamField query="role" type="string" optional>
+  Filter by membership role. One of `"member"`, `"admin"`, or `"owner"`.
+</ParamField>
+
+```python
+# All organizations
+result = await client.auth.organizations()
+for org in result["organizations"]:
+    print(f"{org['name']} ({org['role']}) — slug: {org['slug']}")
+
+# Filter to only organizations where the user is an owner
+owned = await client.auth.organizations(role="owner")
+print(f"You own {owned['total']} organization(s)")
+
+# Filter to admin-level access
+admin_orgs = await client.auth.organizations(role="admin")
+```
+
+---
+
+## List Pending Invitations
+
+Retrieve all pending invitations for the authenticated user across all organizations.
+
+```python
+from modulex import AuthenticationError
+
+try:
+    result = await client.auth.invitations()
+    for inv in result["invitations"]:
+        print(f"Invited to: {inv['organization_name']} by {inv['invited_by']}")
+        print(f"  Invitation ID: {inv['id']}")
+        print(f"  Role offered:  {inv['role']}")
+except AuthenticationError:
+    print("Invalid or expired API key")
+```
+
+---
+
+## Accept Invitation
+
+<ParamField path="invitation_id" type="string" required>
+  UUID of the invitation to accept.
+</ParamField>
+
+<Warning>
+  Only the invited user (email match) can accept an invitation. Accepting may be blocked if the organization has reached its seat limit.
+</Warning>
+
+```python
+from modulex import NotFoundError, BadRequestError
+
+invitation_id = "inv-uuid-here"
+
+try:
+    result = await client.auth.accept_invitation(invitation_id)
+    if result["success"]:
+        print("Invitation accepted — you are now a member")
+except NotFoundError:
+    print("Invitation not found or already used")
+except BadRequestError as e:
+    print(f"Cannot accept: {e.message}")
+```
+
+---
+
+## Reject Invitation
+
+<ParamField path="invitation_id" type="string" required>
+  UUID of the invitation to reject.
+</ParamField>
+
+```python
+result = await client.auth.reject_invitation("inv-uuid-here")
+if result["success"]:
+    print("Invitation rejected")
+```
+
+---
+
+## Leave Organization
+
+Leave an organization. The `organization_id` defaults to the client-level organization, or you can pass an explicit one.
+
+<Warning>
+  Organization owners cannot leave their own organization. Transfer ownership before attempting to leave.
+</Warning>
+
+```python
+from modulex import BadRequestError, PermissionError
+
+try:
+    result = await client.auth.leave_organization(
+        organization_id="org-uuid-to-leave"
+    )
+    print(result["message"])
+    print(f"Remaining orgs: {result['total_remaining']}")
+    for org in result["remaining_organizations"]:
+        print(f"  - {org['name']}")
+except PermissionError:
+    print("Owners cannot leave their own organization")
+except BadRequestError as e:
+    print(f"Error: {e.message}")
+```
+
+<Tip>
+  After leaving an organization, update your client to use a different `organization_id` for subsequent requests.
+</Tip>

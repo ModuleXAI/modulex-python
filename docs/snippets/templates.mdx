@@ -1,0 +1,253 @@
+---
+title: "Templates"
+description: "Browse, use, create, and publish workflow templates to the ModuleX template marketplace"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  The template catalog is publicly browsable without organization context. Creating and using templates requires organization admin access.
+</Note>
+
+---
+
+## List Templates
+
+Browse the full template catalog, sorted by usage count descending.
+
+```python
+result = await client.templates.list()
+
+print(f"Total templates: {len(result['templates'])}")
+for template in result["templates"]:
+    print(f"  {template['name']} — {template['like_count']} likes, {template['used_count']} uses")
+    print(f"    Tags: {', '.join(template.get('tags', []))}")
+    print(f"    ID:   {template['id']}")
+
+print(f"From cache: {result.get('cached', False)}")
+```
+
+---
+
+## Get Template
+
+Retrieve full details for a single template, including its `workflow_schema`.
+
+<ParamField path="template_id" type="string" required>
+  UUID of the template to retrieve.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    template = await client.templates.get("template-uuid-here")
+    print(f"Name:        {template['name']}")
+    print(f"Description: {template['description']}")
+    print(f"Creator:     {template['creator']['name']}")
+    print(f"Likes:       {template['like_count']}")
+    print(f"Uses:        {template['used_count']}")
+    print(f"Liked by me: {template['is_liked']}")
+    print(f"Tags:        {', '.join(template.get('tags', []))}")
+    schema = template["workflow_schema"]
+    print(f"Nodes:       {len(schema.get('nodes', []))}")
+except NotFoundError:
+    print("Template not found")
+```
+
+---
+
+## My Templates
+
+Retrieve templates created by the authenticated user.
+
+```python
+result = await client.templates.my_templates()
+print(f"Your templates: {result['total']}")
+for template in result["templates"]:
+    print(f"  {template['name']} — {template['used_count']} uses")
+```
+
+---
+
+## Create Template
+
+Publish a workflow as a reusable template. The template captures the current schema of the specified workflow.
+
+<ParamField body="workflow_id" type="string" required>
+  UUID of the workflow to publish as a template.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Template display name.
+</ParamField>
+
+<ParamField body="description" type="string" optional>
+  Description explaining what the template does and who it is for.
+</ParamField>
+
+<ParamField body="tags" type="array" optional>
+  Tags for discoverability (e.g., `["customer-support", "agent", "email"]`).
+</ParamField>
+
+<ParamField body="schema_image_url" type="string" optional>
+  URL to a rendered diagram image for the template preview.
+</ParamField>
+
+```python
+from modulex import ValidationError, PermissionError
+
+try:
+    template = await client.templates.create(
+        workflow_id="wf-uuid-here",
+        name="Customer Support Email Agent",
+        description=(
+            "An AI agent that reads incoming support emails, "
+            "classifies intent, and drafts appropriate responses."
+        ),
+        tags=["customer-support", "email", "agent", "classification"],
+        schema_image_url="https://cdn.acme.com/templates/support-agent.png",
+    )
+    print(f"Template published: {template['id']}")
+    print(f"Visibility: {template.get('visibility')}")
+except ValidationError as e:
+    print(f"Validation error: {e.message}")
+except PermissionError:
+    print("Admin access required to create templates")
+```
+
+---
+
+## Like a Template
+
+Toggle a like on a template. Calling this endpoint again on the same template removes the like.
+
+<ParamField path="template_id" type="string" required>
+  UUID of the template to like (or unlike).
+</ParamField>
+
+```python
+result = await client.templates.like("template-uuid-here")
+action = "liked" if result["liked"] else "unliked"
+print(f"Template {action} — total likes: {result['like_count']}")
+```
+
+---
+
+## Use a Template
+
+Copy a template's workflow schema into a new workflow in your organization.
+
+<ParamField path="template_id" type="string" required>
+  UUID of the template to use.
+</ParamField>
+
+```python
+from modulex import PermissionError
+
+try:
+    result = await client.templates.use("template-uuid-here")
+    print(f"Success:  {result['success']}")
+    print(f"Message:  {result['message']}")
+    new_workflow = result["workflow"]
+    print(f"New workflow ID:   {new_workflow['id']}")
+    print(f"New workflow name: {new_workflow['name']}")
+    print(f"Template uses:     {result['used_count']}")
+except PermissionError:
+    print("Admin access required to use templates")
+```
+
+<Tip>
+  After using a template, customize the new workflow via `client.workflows.update()` before activating it.
+</Tip>
+
+---
+
+## Request Template Update
+
+Submit a workflow update to an existing template you own. This replaces the template's schema with the latest version from the specified workflow.
+
+<ParamField body="workflow_id" type="string" required>
+  UUID of the workflow whose current schema should update the template.
+</ParamField>
+
+```python
+result = await client.templates.update_request(
+    "template-uuid-here",
+    workflow_id="wf-uuid-here",
+    name="Customer Support Email Agent v2",
+    description="Updated with GPT-4o and improved routing logic",
+    tags=["customer-support", "email", "agent", "gpt-4o"],
+    schema_image_url="https://cdn.acme.com/templates/support-agent-v2.png",
+)
+print(f"Template update submitted: {result.get('id')}")
+```
+
+---
+
+## Create Creator Profile
+
+Create a public creator profile for publishing templates under a branded identity.
+
+<ParamField body="name" type="string" required>
+  Creator or organization name (1–255 characters).
+</ParamField>
+
+<ParamField body="about" type="string" optional>
+  Short bio or description of your work.
+</ParamField>
+
+<ParamField body="display_photo" type="string" optional>
+  URL to a profile photo or logo.
+</ParamField>
+
+<ParamField body="socials" type="object" optional>
+  Social links (e.g., `{"twitter": "...", "github": "..."}`).
+</ParamField>
+
+```python
+creator = await client.templates.create_creator(
+    name="Acme AI Team",
+    about="We build production-ready AI workflow templates for enterprise teams.",
+    display_photo="https://cdn.acme.com/logo.png",
+    socials={
+        "twitter": "https://twitter.com/acmeai",
+        "github": "https://github.com/acme-ai",
+        "website": "https://acme.com",
+    },
+)
+print(f"Creator profile: {creator['id']}")
+```
+
+---
+
+## Get My Creator Profile
+
+Retrieve your own creator profile.
+
+```python
+from modulex import NotFoundError
+
+try:
+    profile = await client.templates.my_creator()
+    print(f"Name:    {profile['name']}")
+    print(f"About:   {profile.get('about', '')}")
+    print(f"Socials: {profile.get('socials', {})}")
+except NotFoundError:
+    print("No creator profile found — create one with create_creator()")
+```

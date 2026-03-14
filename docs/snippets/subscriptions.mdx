@@ -1,0 +1,157 @@
+---
+title: "Subscriptions"
+description: "Manage organization subscription plans, billing details, and Stripe checkout sessions"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  All subscription endpoints require **organization admin** access. Subscription management is powered by Stripe. Billing operations may raise `ExternalServiceError` if Stripe is unreachable.
+</Note>
+
+---
+
+## List Organization Plans
+
+Retrieve all available subscription plans for your organization, including pricing options.
+
+```python
+from modulex import ExternalServiceError
+
+try:
+    result = await client.subscriptions.organization_plans()
+    print(f"Available plans: {result['total']}")
+
+    for plan in result["plans"]:
+        selectable = "selectable" if plan["is_selectable"] else "current/lower"
+        print(f"\n  {plan['name']} (order: {plan['sort_order']}) [{selectable}]")
+        print(f"  Enterprise: {plan['is_enterprise']}")
+        print(f"  Discount:   {plan['discount'] * 100:.0f}%")
+        print(f"  Features:")
+        for feature in plan.get("features", []):
+            print(f"    - {feature}")
+        print(f"  Pricing:")
+        for price in plan.get("prices", []):
+            print(f"    {price['interval']}: ${price['price']:.2f} {price['currency'].upper()}")
+
+except ExternalServiceError:
+    print("Stripe is currently unavailable — try again shortly")
+```
+
+<Note>
+  `is_selectable` is `True` only for plans with a higher tier than your current subscription. You cannot downgrade via the API — use the customer portal instead.
+</Note>
+
+---
+
+## Organization Billing
+
+Retrieve the current subscription and billing information for the organization.
+
+```python
+from modulex import PermissionError
+
+try:
+    billing = await client.subscriptions.organization_billing()
+
+    if not billing["has_subscription"]:
+        print("Organization is on the free tier — no active subscription")
+    else:
+        sub = billing["subscription"]
+        plan = billing["plan"]
+
+        print(f"Plan:             {plan['name']}")
+        print(f"Status:           {sub['status']}")  # "active", "past_due", "canceled"
+        print(f"Billing interval: {sub['billing_interval']}")
+        print(f"Current price:    ${sub['current_price']:.2f}")
+        print(f"Period start:     {sub['current_period_start'][:10]}")
+        print(f"Period end:       {sub['current_period_end'][:10]}")
+        print(f"Created:          {sub['created_at'][:10]}")
+
+        if sub["status"] == "past_due":
+            print("\nWARNING: Payment is past due — update billing details in the portal")
+
+except PermissionError:
+    print("Admin access required to view billing details")
+```
+
+---
+
+## Generate Checkout Link
+
+Create a Stripe Checkout session URL for upgrading to a new plan. Redirect the user to this URL to complete payment.
+
+<ParamField query="plan_id" type="string" required>
+  UUID of the subscription plan to purchase. Retrieve plan IDs from `organization_plans()`.
+</ParamField>
+
+<ParamField query="interval" type="string" required>
+  Billing interval: `"month"` or `"year"`.
+</ParamField>
+
+```python
+from modulex import BadRequestError, ExternalServiceError
+
+try:
+    # First, get the plan you want to upgrade to
+    plans = await client.subscriptions.organization_plans()
+    pro_plan = next(
+        (p for p in plans["plans"] if p["name"] == "Pro" and p["is_selectable"]),
+        None,
+    )
+
+    if not pro_plan:
+        print("Pro plan is not available for selection")
+    else:
+        result = await client.subscriptions.checkout_link(
+            plan_id=pro_plan["id"],
+            interval="month",
+        )
+        print(f"Checkout URL: {result['url']}")
+        # Redirect your user to result["url"] to complete the upgrade
+
+except BadRequestError as e:
+    print(f"Invalid plan or interval: {e.message}")
+except ExternalServiceError:
+    print("Stripe checkout is temporarily unavailable")
+```
+
+<Warning>
+  Checkout links expire after a short period. Generate a fresh link each time the user initiates an upgrade flow — do not cache checkout URLs.
+</Warning>
+
+---
+
+## Customer Portal
+
+Generate a Stripe Customer Portal link for managing billing details, invoices, and downgrades.
+
+```python
+from modulex import ExternalServiceError
+
+try:
+    result = await client.subscriptions.customer_portal()
+    print(f"Portal URL: {result['url']}")
+    # Redirect your user to result["url"] to manage their subscription
+except ExternalServiceError:
+    print("Stripe portal is temporarily unavailable")
+```
+
+<Tip>
+  The customer portal supports plan downgrades, payment method updates, invoice downloads, and subscription cancellation. Link to it from your organization settings page.
+</Tip>

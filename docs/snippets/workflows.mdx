@@ -1,0 +1,295 @@
+---
+title: "Workflows"
+description: "Create, manage, and inspect AI workflows and their node builder details"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## List Workflows
+
+<ParamField query="status" type="string" optional>
+  Filter by workflow status: `"draft"`, `"active"`, or `"archived"`.
+</ParamField>
+
+<ParamField query="category" type="string" optional>
+  Filter by workflow category (e.g., `"customer-support"`, `"data-processing"`).
+</ParamField>
+
+<ParamField query="visibility" type="string" optional>
+  Filter by visibility: `"private"` or `"public"`.
+</ParamField>
+
+<ParamField query="search" type="string" optional>
+  Full-text search across workflow names and descriptions.
+</ParamField>
+
+<ParamField query="page" type="integer" optional>
+  Page number (starts at 1). Default: `1`.
+</ParamField>
+
+<ParamField query="page_size" type="integer" optional>
+  Items per page (1–100). Default: `20`.
+</ParamField>
+
+<Note>
+  The `workflow_schema` field is excluded from list responses for performance. Use `get()` to retrieve the full schema for a specific workflow.
+</Note>
+
+```python
+# List active workflows
+result = await client.workflows.list(status="active", page=1, page_size=20)
+
+print(f"Found {result['total']} workflows ({result['total_pages']} pages)")
+for wf in result["workflows"]:
+    print(f"  {wf['name']} v{wf['version']} — {wf['status']}")
+
+# Search + filter
+result = await client.workflows.list(
+    search="email",
+    category="marketing",
+    visibility="private",
+)
+```
+
+---
+
+## Auto-Paginate All Workflows
+
+Automatically fetch all workflows across pages without manual pagination.
+
+```python
+# Iterate over every active workflow — pages fetched automatically
+async for workflow in client.workflows.list_all(status="active"):
+    print(f"{workflow['name']} — last updated: {workflow['updated_at']}")
+
+# Collect into a list
+all_drafts = [wf async for wf in client.workflows.list_all(status="draft")]
+print(f"Total draft workflows: {len(all_drafts)}")
+```
+
+---
+
+## Get Workflow
+
+Retrieve a single workflow by ID, including its full `workflow_schema`.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow to retrieve.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    workflow = await client.workflows.get("wf-uuid-here")
+    print(f"Name:    {workflow['name']}")
+    print(f"Version: {workflow['version']}")
+    print(f"Status:  {workflow['status']}")
+    schema = workflow["workflow_schema"]
+    print(f"Nodes:   {len(schema['nodes'])}")
+    print(f"Edges:   {len(schema['edges'])}")
+except NotFoundError:
+    print("Workflow not found")
+```
+
+---
+
+## Create Workflow
+
+<ParamField body="workflow_schema" type="object" required>
+  Full `WorkflowDefinition` object including metadata, nodes, edges, state schema, and entry point.
+</ParamField>
+
+<ParamField body="name" type="string" optional>
+  Display name. If omitted, extracted from `workflow_schema.metadata.name`.
+</ParamField>
+
+<ParamField body="status" type="string" optional>
+  Initial status: `"draft"` (default) or `"active"`.
+</ParamField>
+
+<ParamField body="visibility" type="string" optional>
+  `"private"` (default) or `"public"`.
+</ParamField>
+
+```python
+from modulex import ValidationError
+
+try:
+    workflow = await client.workflows.create(
+        workflow_schema={
+            "metadata": {
+                "name": "Customer Support Agent",
+                "description": "Triages and responds to support tickets",
+                "version": "1.0",
+                "author": "platform-team",
+                "tags": ["support", "agent"],
+            },
+            "config": {
+                "default_llm": {
+                    "integration_name": "openai",
+                    "provider_id": "openai",
+                    "model_id": "gpt-4o",
+                    "temperature": 0.3,
+                },
+                "recursion_limit": 25,
+                "checkpointing": "postgres",
+            },
+            "state_schema": {
+                "fields": {
+                    "messages": {
+                        "type": "messages",
+                        "description": "Conversation history",
+                        "reducer": "add",
+                        "required": True,
+                        "default": None,
+                    }
+                }
+            },
+            "nodes": [
+                {
+                    "id": "support_agent",
+                    "type": "agent",
+                    "name": "Support Agent",
+                    "enabled": True,
+                    "x": 300,
+                    "y": 200,
+                    "agent_config": {
+                        "llm": {
+                            "integration_name": "openai",
+                            "provider_id": "openai",
+                            "model_id": "gpt-4o",
+                            "temperature": 0.3,
+                        },
+                        "tools": [],
+                        "system_prompt": "You are a helpful customer support agent.",
+                        "user_prompt": "{{input.messages}}",
+                        "max_iterations": 10,
+                    },
+                }
+            ],
+            "edges": [],
+            "entry_point": "support_agent",
+        },
+        name="Customer Support Agent",
+        description="Triages and responds to support tickets",
+        status="draft",
+        visibility="private",
+        category="customer-support",
+        tags=["support", "agent"],
+    )
+    print(f"Created workflow: {workflow['id']}")
+except ValidationError as e:
+    print(f"Validation error: {e.message}")
+```
+
+---
+
+## Update Workflow
+
+All fields are optional. Only the fields you provide are updated.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow to update.
+</ParamField>
+
+```python
+updated = await client.workflows.update(
+    "wf-uuid-here",
+    name="Customer Support Agent v2",
+    description="Updated with new escalation logic",
+    status="active",
+    tags=["support", "agent", "escalation"],
+)
+print(f"Updated at: {updated['updated_at']}")
+
+# Update the schema itself
+updated = await client.workflows.update(
+    "wf-uuid-here",
+    workflow_schema={
+        # ... full updated WorkflowDefinition
+    },
+)
+```
+
+<Note>
+  Updating `workflow_schema` publishes a change event via Redis, which notifies any live Composer sessions watching this workflow.
+</Note>
+
+---
+
+## Delete Workflow
+
+Soft-deletes a workflow (sets `deleted_at`). The workflow is no longer accessible to members.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow to delete.
+</ParamField>
+
+```python
+from modulex import NotFoundError, PermissionError
+
+try:
+    result = await client.workflows.delete("wf-uuid-here")
+    print(result["message"])
+except NotFoundError:
+    print("Workflow not found")
+except PermissionError:
+    print("Admin access required to delete workflows")
+```
+
+---
+
+## Builder Details
+
+Retrieve metadata about available node types, categories, and tool integrations for the workflow builder UI.
+
+<ParamField query="node_type" type="string" optional>
+  Filter to a specific node type: `"llm"`, `"agent"`, `"tool"`, `"function"`, `"transformer"`, `"interrupt"`, or `"conditional"`.
+</ParamField>
+
+<ParamField query="category" type="string" optional>
+  Filter nodes by category.
+</ParamField>
+
+<ParamField query="integration_name" type="string" optional>
+  Filter tool nodes by integration name (e.g., `"tavily"`, `"github"`).
+</ParamField>
+
+<Note>
+  Builder details are cached for 60 minutes. Use this endpoint to populate the node palette in a workflow builder interface.
+</Note>
+
+```python
+# All node types and categories
+details = await client.workflows.builder_details()
+print(f"Cached: {details['cached']}")
+for node_type, info in details["node_types"].items():
+    print(f"  {node_type}: {info}")
+
+# Only tool nodes from Tavily integration
+tool_details = await client.workflows.builder_details(
+    node_type="tool",
+    integration_name="tavily",
+)
+
+# Only LLM nodes
+llm_details = await client.workflows.builder_details(node_type="llm")
+```

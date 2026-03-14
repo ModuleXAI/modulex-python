@@ -1,0 +1,145 @@
+---
+title: "System"
+description: "Health checks, platform metrics, and timezone utilities"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+# System endpoints are public — no API key required for health/metrics/timezones
+client = Modulex(api_key="mx_live_...")
+```
+
+<Note>
+  All system endpoints are public and do not require authentication. They are suitable for use in uptime monitors, pre-flight checks, and timezone selectors.
+</Note>
+
+---
+
+## Health Check
+
+Verify that the ModuleX API is operational. Use this in uptime monitors and deployment pipelines.
+
+```python
+from modulex import ServiceUnavailableError
+
+try:
+    health = await client.system.health()
+    print(f"Status:  {health['status']}")   # "healthy"
+    print(f"Service: {health['service']}")  # "ModuleX"
+    print(f"Version: {health['version']}")  # "0.1.2"
+
+    if health["status"] == "healthy":
+        print("API is operational")
+    else:
+        print(f"API degraded: {health.get('message')}")
+
+except ServiceUnavailableError:
+    print("API is currently unavailable — check https://status.modulex.dev")
+```
+
+### Health Check in a Deployment Pipeline
+
+```python
+import asyncio
+
+async def wait_for_api(retries: int = 10, delay: float = 3.0):
+    """Block until the API is healthy or raise after max retries."""
+    for attempt in range(retries):
+        try:
+            health = await client.system.health()
+            if health["status"] == "healthy":
+                print(f"API healthy after {attempt + 1} attempt(s)")
+                return
+        except Exception:
+            pass
+        print(f"Attempt {attempt + 1}/{retries} failed — retrying in {delay}s")
+        await asyncio.sleep(delay)
+    raise RuntimeError("API did not become healthy within the timeout period")
+
+await wait_for_api()
+```
+
+---
+
+## Platform Metrics
+
+Retrieve Prometheus-format metrics for the ModuleX platform. Suitable for scraping with a Prometheus-compatible monitoring stack.
+
+```python
+metrics = await client.system.metrics()
+# Returns raw Prometheus text format
+print(metrics[:500])  # Preview first 500 chars
+```
+
+<Note>
+  The `/system/metrics` endpoint returns plain text in Prometheus exposition format, not JSON. The SDK returns the raw text string.
+</Note>
+
+---
+
+## List Timezones
+
+Retrieve the full timezone catalog, organized by popular regions and a flat all-timezones list. Use this to populate timezone selectors in schedule creation forms.
+
+```python
+result = await client.system.timezones()
+
+# Popular timezones grouped by region
+for region in result.get("popular", []):
+    print(f"\n{region['region']}:")
+    for tz in region["timezones"]:
+        print(f"  {tz['value']:<35} {tz['label']:<40} {tz['offset']}")
+
+# Total timezones available
+total = len(result.get("all_timezones", []))
+print(f"\nTotal timezones: {total}")
+
+# Check if a specific timezone is valid
+all_tz = result.get("all_timezones", [])
+if "America/New_York" in all_tz:
+    print("America/New_York is a valid timezone")
+```
+
+---
+
+## Search Timezones
+
+Search for timezones by name, city, or region. Useful for autocomplete inputs in schedule creation flows.
+
+<ParamField query="q" type="string" required>
+  Search query — minimum 2 characters. Returns up to 20 matching timezones.
+</ParamField>
+
+```python
+from modulex import ValidationError
+
+try:
+    results = await client.system.search_timezones(q="Istanbul")
+    for tz in results:
+        print(f"  {tz['value']:<35} {tz['label']:<40} {tz['offset']}")
+
+    # Fuzzy search by offset
+    results = await client.system.search_timezones(q="+05:30")
+    for tz in results:
+        print(f"  {tz['value']} ({tz['label']})")
+
+    # Search by region
+    eu_results = await client.system.search_timezones(q="Europe")
+    print(f"Europe timezones: {len(eu_results)}")
+
+except ValidationError:
+    print("Search query must be at least 2 characters")
+```
+
+<Tip>
+  Combine `search_timezones()` with a debounced search input to build responsive timezone autocomplete fields for schedule creation. The results are limited to 20 entries per query.
+</Tip>

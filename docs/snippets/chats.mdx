@@ -1,0 +1,230 @@
+---
+title: "Chats"
+description: "Retrieve, organize, and stream real-time updates for workflow execution chats"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  Chats are automatically created when a workflow is executed with `ephemeral=False`. Each chat holds the full message history for a workflow run thread.
+</Note>
+
+---
+
+## List Chats
+
+Retrieve all chats for the organization, grouped by folder.
+
+```python
+result = await client.chats.list()
+
+# Chats are grouped by folder
+for folder, chats in result.items():
+    print(f"\n--- {folder.upper()} ({len(chats)}) ---")
+    for chat in chats:
+        private = " [private]" if chat["is_private"] else ""
+        running = " [running]" if chat.get("running_id") else ""
+        print(f"  {chat['title']}{private}{running}")
+        print(f"    ID: {chat['id']}")
+
+# Access specific folders
+pinned = result.get("pinned", [])
+archived = result.get("archived", [])
+all_chats = result.get("chats", [])
+```
+
+<Note>
+  The response keys are dynamic folder names. Common keys include `"chats"` (default), `"pinned"`, `"archived"`, and any custom folder names created by users.
+</Note>
+
+---
+
+## Get Chat
+
+Retrieve a specific chat with its messages.
+
+<ParamField path="chat_id" type="string" required>
+  UUID of the chat to retrieve.
+</ParamField>
+
+```python
+from modulex import NotFoundError, PermissionError
+
+try:
+    chat = await client.chats.get("chat-uuid-here")
+    print(f"Title:      {chat['title']}")
+    print(f"Private:    {chat['is_private']}")
+    print(f"Created:    {chat['created_at']}")
+    print(f"Messages:   {len(chat.get('messages', []))}")
+
+    for msg in chat.get("messages", []):
+        role = msg["role"].upper()
+        content = msg["content"]
+        if isinstance(content, str):
+            print(f"  [{role}] {content[:100]}")
+        elif isinstance(content, list):
+            print(f"  [{role}] (multi-part message, {len(content)} parts)")
+except NotFoundError:
+    print("Chat not found")
+except PermissionError:
+    print("Access denied — private chat")
+```
+
+---
+
+## Get Chat Messages
+
+Retrieve paginated messages for a chat.
+
+<ParamField path="chat_id" type="string" required>
+  UUID of the chat.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Number of messages to return (1–1000). Default: `20`.
+</ParamField>
+
+<ParamField query="offset" type="integer" optional>
+  Number of messages to skip. Default: `0`.
+</ParamField>
+
+```python
+# First page
+result = await client.chats.messages("chat-uuid-here", limit=20, offset=0)
+
+print(f"Total messages: {result['total']}")
+print(f"Has next page:  {result['has_next']}")
+
+for msg in result["messages"]:
+    print(f"[{msg['role'].upper()}] {str(msg['content'])[:80]}")
+    print(f"  Run ID: {msg.get('run_id', 'N/A')}")
+    print(f"  Status: {msg.get('running_status', 'N/A')}")
+
+# Paginate through all messages
+offset = 0
+limit = 50
+all_messages = []
+
+while True:
+    page = await client.chats.messages("chat-uuid-here", limit=limit, offset=offset)
+    all_messages.extend(page["messages"])
+    if not page["has_next"]:
+        break
+    offset += limit
+
+print(f"Fetched {len(all_messages)} messages total")
+```
+
+---
+
+## Update Chat
+
+Update a chat's title, privacy setting, or folder assignment.
+
+<ParamField path="chat_id" type="string" required>
+  UUID of the chat to update.
+</ParamField>
+
+<ParamField body="title" type="string" optional>
+  New title for the chat.
+</ParamField>
+
+<ParamField body="is_private" type="boolean" optional>
+  Change the privacy setting. Only the chat creator can modify this for private chats.
+</ParamField>
+
+<ParamField body="folder" type="string" optional>
+  Move the chat to a folder. Use `"pinned"`, `"archived"`, or any custom folder name.
+</ParamField>
+
+```python
+# Rename a chat
+updated = await client.chats.update(
+    "chat-uuid-here",
+    title="Q1 Sales Analysis — Final",
+)
+
+# Pin a chat
+await client.chats.update("chat-uuid-here", folder="pinned")
+
+# Archive a chat
+await client.chats.update("chat-uuid-here", folder="archived")
+
+# Move to a custom folder
+await client.chats.update("chat-uuid-here", folder="project-alpha")
+
+# Make a chat private
+await client.chats.update("chat-uuid-here", is_private=True)
+```
+
+---
+
+## Delete Chat
+
+Soft-delete a chat. The chat is no longer visible but data is retained.
+
+<ParamField path="chat_id" type="string" required>
+  UUID of the chat to delete.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    result = await client.chats.delete("chat-uuid-here")
+    print(f"Deleted: {result['success']}")
+    print(f"Message: {result['message']}")
+except NotFoundError:
+    print("Chat not found")
+```
+
+---
+
+## Stream Chat List Updates (SSE)
+
+Receive real-time notifications when the chat list changes — for example when a new workflow run completes and creates a new chat.
+
+```python
+from modulex import StreamError
+
+print("Listening for chat list changes...")
+
+async for event in client.chats.stream():
+    if event.event == "connected":
+        print("SSE connection established")
+
+    elif event.event == "chat_list_updated":
+        update_type = event.data.get("type")  # "public" or "private"
+        timestamp = event.data.get("timestamp")
+        print(f"Chat list updated ({update_type}) at {timestamp}")
+
+        # Re-fetch the chat list to get the latest state
+        chats = await client.chats.list()
+        print(f"  Now have {len(chats.get('chats', []))} chats")
+
+    elif event.event == "keepalive":
+        # Server sends this every 30 seconds — safe to ignore
+        pass
+
+    elif event.event == "error":
+        raise StreamError(f"Chat stream error: {event.data}")
+```
+
+<Note>
+  The chat stream sends a `keepalive` event every 30 seconds to keep the connection alive. Ignore these in your event loop.
+</Note>

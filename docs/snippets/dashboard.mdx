@@ -1,0 +1,238 @@
+---
+title: "Dashboard"
+description: "Access organization audit logs, usage analytics, and user management"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  Dashboard endpoints require elevated permissions. Logs require **owner** access; analytics and users require **admin** access.
+</Note>
+
+---
+
+## Audit Logs
+
+Retrieve the organization's audit log — a record of all significant credential, membership, and organization events.
+
+<ParamField query="limit" type="integer" optional>
+  Log entries to return (1–1000). Default: `50`.
+</ParamField>
+
+<ParamField query="offset" type="integer" optional>
+  Entries to skip for pagination. Default: `0`.
+</ParamField>
+
+<ParamField query="category" type="string" optional>
+  Filter by log category: `"CREDENTIALS"`, `"MEMBERSHIP"`, or `"ORGANIZATION"`.
+</ParamField>
+
+<ParamField query="operation" type="string" optional>
+  Filter by specific operation name.
+</ParamField>
+
+<ParamField query="start_date" type="string" optional>
+  Start of the time range (ISO 8601).
+</ParamField>
+
+<ParamField query="end_date" type="string" optional>
+  End of the time range (ISO 8601).
+</ParamField>
+
+```python
+from modulex import PermissionError
+
+try:
+    result = await client.dashboard.logs(
+        limit=50,
+        offset=0,
+        category="CREDENTIALS",
+        start_date="2026-01-01T00:00:00Z",
+        end_date="2026-03-09T00:00:00Z",
+    )
+
+    data = result["data"]
+    print(f"Total logs:    {data['total_count']}")
+    print(f"Has next page: {data['has_next']}")
+
+    for log in data["logs"]:
+        print(f"  [{log.get('category')}] {log.get('operation')} — {log.get('timestamp')}")
+        print(f"    User: {log.get('user_id')} — Resource: {log.get('resource_id')}")
+
+    # Paginate through all logs
+    all_logs = []
+    offset = 0
+    while True:
+        page = await client.dashboard.logs(limit=100, offset=offset)
+        all_logs.extend(page["data"]["logs"])
+        if not page["data"]["has_next"]:
+            break
+        offset += 100
+
+    print(f"Total log entries: {len(all_logs)}")
+except PermissionError:
+    print("Owner access required to view audit logs")
+```
+
+---
+
+## Analytics Overview
+
+Retrieve a high-level overview of organization activity including member counts, integration usage, and credit consumption.
+
+<ParamField query="limit" type="integer" optional>
+  Credential usage log entries to include. Default: `20`.
+</ParamField>
+
+```python
+result = await client.dashboard.analytics_overview()
+overview = result["data"]["overview"]
+
+print(f"Active members:       {overview['active_member_count']}")
+print(f"Configured integrations: {overview['configured_integrations_count']}")
+print(f"Total integrations:   {overview['total_integrations_count']}")
+print(f"Total credentials:    {overview['total_credentials_count']}")
+print(f"Credits this week:    {overview['current_week_credit_usage']:.2f}")
+
+subscription = overview.get("subscription", {})
+if subscription:
+    print(f"Plan: {subscription.get('plan_name')} — Status: {subscription.get('status')}")
+
+# Recent credential usage
+for entry in overview.get("credential_usage_logs", []):
+    print(f"  {entry.get('integration_name')}: {entry.get('call_count')} calls")
+```
+
+---
+
+## Tool Analytics
+
+Retrieve tool execution analytics for a time period.
+
+<ParamField query="period" type="string" optional>
+  Time window: `"24h"`, `"7d"` (default), `"30d"`, or `"90d"`.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Top tools to return. Default: `20`.
+</ParamField>
+
+<ParamField query="offset" type="integer" optional>
+  Entries to skip. Default: `0`.
+</ParamField>
+
+```python
+# Tool usage over the past 30 days
+result = await client.dashboard.analytics_tools(period="30d", limit=20)
+data = result["data"]
+
+print(f"Period: {data.get('period')}")
+for tool in data.get("tools", []):
+    print(f"  {tool['integration_name']}.{tool['action']}:")
+    print(f"    Calls:      {tool['call_count']}")
+    print(f"    Successes:  {tool['success_count']}")
+    print(f"    Failures:   {tool['failure_count']}")
+
+# Compare periods
+weekly = await client.dashboard.analytics_tools(period="7d")
+monthly = await client.dashboard.analytics_tools(period="30d")
+```
+
+---
+
+## LLM Usage Analytics
+
+Retrieve token consumption and cost analytics for LLM calls.
+
+<ParamField query="period" type="string" optional>
+  Time window: `"24h"`, `"7d"` (default), `"30d"`, or `"90d"`.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Top models to return. Default: `20`.
+</ParamField>
+
+```python
+result = await client.dashboard.analytics_llm_usage(period="7d")
+data = result["data"]
+
+for model in data.get("models", []):
+    print(f"  {model.get('provider')}/{model.get('model_id')}:")
+    print(f"    Input tokens:  {model.get('total_input_tokens', 0):,}")
+    print(f"    Output tokens: {model.get('total_output_tokens', 0):,}")
+    print(f"    Calls:         {model.get('call_count', 0)}")
+    cost = model.get("estimated_cost_usd", 0)
+    print(f"    Est. cost:     ${cost:.4f}")
+
+total = data.get("totals", {})
+print(f"\nTotal tokens this period: {total.get('total_tokens', 0):,}")
+print(f"Total estimated cost:     ${total.get('total_cost_usd', 0):.2f}")
+```
+
+---
+
+## Users
+
+List organization members with filtering and sorting options.
+
+<ParamField query="search" type="string" optional>
+  Search by name or email.
+</ParamField>
+
+<ParamField query="status" type="string" optional>
+  Filter by `"active"` or `"inactive"`.
+</ParamField>
+
+<ParamField query="sort_by" type="string" optional>
+  Sort field: `"name"`, `"email"`, `"created_at"` (default), or `"last_active"`.
+</ParamField>
+
+<ParamField query="order" type="string" optional>
+  Sort direction: `"asc"` or `"desc"` (default).
+</ParamField>
+
+<ParamField query="page" type="integer" optional>
+  Page number (starts at 1). Default: `1`.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Users per page (1–100). Default: `10`.
+</ParamField>
+
+```python
+# All members, most recently joined first
+result = await client.dashboard.users(
+    sort_by="created_at",
+    order="desc",
+    limit=25,
+)
+
+print(f"Total members:     {result['total']}")
+print(f"Seat limit:        {result['max_seats']}")
+print(f"Pending invites:   {result['invitation_count']}")
+print(f"Remaining seats:   {result['max_seats'] - result['total']}")
+
+for user in result["users"]:
+    print(f"  {user['email']} — {user.get('role')} — joined: {user['created_at'][:10]}")
+
+# Search for a specific user
+found = await client.dashboard.users(search="alice@acme.com")
+if found["users"]:
+    user = found["users"][0]
+    print(f"Found: {user['email']} — role: {user.get('role')}")
+```

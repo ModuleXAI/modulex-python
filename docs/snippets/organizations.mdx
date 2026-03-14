@@ -1,0 +1,235 @@
+---
+title: "Organizations"
+description: "Create organizations, manage members, send invitations, and configure LLM access"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## Create Organization
+
+Create a new organization. The authenticated user automatically becomes the owner.
+
+<ParamField body="name" type="string" required>
+  Organization display name (2–40 characters).
+</ParamField>
+
+<ParamField body="slug" type="string" optional>
+  URL-friendly identifier (2–50 characters, lowercase alphanumeric with hyphens). Auto-generated from name if omitted.
+</ParamField>
+
+```python
+from modulex import ConflictError, ValidationError
+
+try:
+    result = await client.organizations.create(
+        name="Acme AI Division",
+        slug="acme-ai",
+    )
+    print(f"Success: {result['success']}")
+    print(f"Message: {result['message']}")
+    org = result["organization"]
+    print(f"ID:   {org['id']}")
+    print(f"Name: {org['name']}")
+    print(f"Slug: {org['slug']}")
+
+except ConflictError:
+    print("An organization with that slug already exists")
+except ValidationError as e:
+    print(f"Invalid input: {e.message}")
+```
+
+---
+
+## Get Organization LLMs
+
+Retrieve all LLM models available to the organization, split into active (with configured credentials) and inactive.
+
+<Note>
+  This endpoint is Redis-cached for 10 minutes (catalog) and 5 minutes (credentials). LLMs appear in the active list when at least one valid credential exists for that provider.
+</Note>
+
+```python
+result = await client.organizations.llms()
+
+print(f"Active LLMs:   {result['active_llm_total']}")
+print(f"Inactive LLMs: {result['inactive_llm_total']}")
+
+print("\nReady to use:")
+for llm in result.get("active_llms", []):
+    print(f"  {llm.get('provider_id')}/{llm.get('model_id')}")
+    print(f"    Context: {llm.get('context_length', 'N/A')} tokens")
+
+print("\nRequires credential setup:")
+for llm in result.get("inactive_llms", []):
+    print(f"  {llm.get('provider_id')}/{llm.get('model_id')}")
+```
+
+---
+
+## Invite a User
+
+Send an email invitation to join the organization.
+
+<ParamField body="invited_email" type="string" required>
+  Email address of the user to invite.
+</ParamField>
+
+<ParamField body="role" type="string" optional>
+  Role to assign upon acceptance: `"member"` (default) or `"admin"`.
+</ParamField>
+
+<ParamField body="invitation_message" type="string" optional>
+  Optional personalized message included in the invitation email.
+</ParamField>
+
+<Warning>
+  Invitations are subject to your subscription's seat limit. If the organization is at capacity, the invitation will be rejected with a `BadRequestError`.
+</Warning>
+
+```python
+from modulex import BadRequestError, ConflictError
+
+try:
+    result = await client.organizations.invite(
+        invited_email="bob@acme.com",
+        role="member",
+        invitation_message="Hi Bob! Join our ModuleX workspace to collaborate on AI workflows.",
+    )
+    print(f"Invitation sent: {result['success']}")
+    print(f"Invited:         {result.get('invited_email')}")
+    print(f"Invitation ID:   {result.get('invitation_id')}")
+
+except ConflictError:
+    print("This user is already a member or has a pending invitation")
+except BadRequestError as e:
+    print(f"Cannot invite: {e.message}")  # e.g., seat limit reached
+```
+
+---
+
+## Cancel Invitation
+
+Cancel a pending invitation before the recipient accepts or rejects it.
+
+<ParamField path="invitation_id" type="string" required>
+  UUID of the invitation to cancel.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    result = await client.organizations.cancel_invitation("inv-uuid-here")
+    print(f"Cancelled: {result['success']}")
+    print(f"Message:   {result['message']}")
+except NotFoundError:
+    print("Invitation not found or already actioned")
+```
+
+---
+
+## Reinvite
+
+Resend the invitation email for an existing pending invitation.
+
+<ParamField path="invitation_id" type="string" required>
+  UUID of the invitation to resend.
+</ParamField>
+
+```python
+result = await client.organizations.reinvite("inv-uuid-here")
+print(f"Resent: {result['success']}")
+```
+
+---
+
+## Update User Role
+
+Change a member's role within the organization.
+
+<ParamField path="organization_id" type="string" required>
+  UUID of the organization.
+</ParamField>
+
+<ParamField path="user_id" type="string" required>
+  UUID of the user whose role to change.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  New role: `"member"` or `"admin"`.
+</ParamField>
+
+<Warning>
+  The owner role cannot be changed via this endpoint. Ownership transfer is handled separately. Admins can only promote members to admin — not demote other admins.
+</Warning>
+
+```python
+from modulex import BadRequestError, PermissionError
+
+try:
+    result = await client.organizations.update_user_role(
+        organization_id="org-uuid-here",
+        user_id="user-uuid-here",
+        role="admin",
+    )
+    print(f"Success:  {result['success']}")
+    print(f"Message:  {result['message']}")
+    print(f"New role: {result['new_role']}")
+
+except PermissionError:
+    print("Insufficient permissions to change this user's role")
+except BadRequestError as e:
+    print(f"Cannot update role: {e.message}")
+```
+
+---
+
+## Remove User
+
+Remove a user from the organization. Only the organization owner can perform this action.
+
+<ParamField path="organization_id" type="string" required>
+  UUID of the organization.
+</ParamField>
+
+<ParamField path="user_id" type="string" required>
+  UUID of the user to remove.
+</ParamField>
+
+<Warning>
+  Removing a user immediately revokes their access to all organization resources. This action cannot be undone — the user must be re-invited to regain access.
+</Warning>
+
+```python
+from modulex import PermissionError, NotFoundError
+
+try:
+    result = await client.organizations.remove_user(
+        organization_id="org-uuid-here",
+        user_id="user-uuid-here",
+    )
+    print(f"Removed: {result['success']}")
+    print(f"Message: {result['message']}")
+
+except PermissionError:
+    print("Only the organization owner can remove members")
+except NotFoundError:
+    print("User is not a member of this organization")
+```

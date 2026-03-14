@@ -1,0 +1,207 @@
+---
+title: "Deployments"
+description: "Deploy workflow versions, manage live deployments, and control activation state"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+<Note>
+  Deployments snapshot a workflow's current schema. Only one deployment can be "live" (active) at a time per workflow. Activating a new deployment automatically deactivates the previous one.
+</Note>
+
+---
+
+## Create Deployment
+
+Snapshot the current workflow schema into a new versioned deployment.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow to deploy.
+</ParamField>
+
+<ParamField body="deployment_note" type="string" optional>
+  Release notes or a description of what changed in this deployment.
+</ParamField>
+
+<ParamField body="schema_image_url" type="string" optional>
+  URL to a rendered diagram image of the workflow for this version.
+</ParamField>
+
+```python
+from modulex import NotFoundError, PermissionError
+
+try:
+    deployment = await client.deployments.create(
+        workflow_id="wf-uuid-here",
+        deployment_note="Added email escalation node and Slack notification",
+        schema_image_url="https://cdn.acme.com/diagrams/wf-v3.png",
+    )
+    print(f"Deployment ID: {deployment['id']}")
+    print(f"Version:       {deployment['version']}")
+    print(f"Is live:       {deployment['is_live']}")
+    print(f"Deployed by:   {deployment['deployed_by']}")
+    print(f"Created at:    {deployment['created_at']}")
+except NotFoundError:
+    print("Workflow not found")
+except PermissionError:
+    print("Admin access required to create deployments")
+```
+
+---
+
+## List Deployments
+
+Retrieve the deployment history for a workflow, ordered by creation date descending.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Number of deployments to return (1–100). Default: `20`.
+</ParamField>
+
+<ParamField query="offset" type="integer" optional>
+  Number of deployments to skip for pagination. Default: `0`.
+</ParamField>
+
+```python
+result = await client.deployments.list(
+    workflow_id="wf-uuid-here",
+    limit=20,
+    offset=0,
+)
+
+print(f"Total deployments: {result['total']}")
+for dep in result["deployments"]:
+    live_marker = " [LIVE]" if dep.get("is_live") else ""
+    print(f"  {dep['version']}{live_marker} — {dep['created_at'][:10]}")
+    if dep.get("deployment_note"):
+        print(f"    Note: {dep['deployment_note']}")
+```
+
+---
+
+## Get Deployment
+
+Retrieve full details for a single deployment, including the captured `workflow_schema`.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<ParamField path="deployment_id" type="string" required>
+  UUID of the deployment.
+</ParamField>
+
+```python
+from modulex import NotFoundError
+
+try:
+    deployment = await client.deployments.get(
+        workflow_id="wf-uuid-here",
+        deployment_id="dep-uuid-here",
+    )
+    schema = deployment["workflow_schema"]
+    print(f"Version: {deployment['version']}")
+    print(f"Live:    {deployment['is_live']}")
+    print(f"Nodes:   {len(schema.get('nodes', []))}")
+    print(f"Note:    {deployment.get('deployment_note', 'None')}")
+except NotFoundError:
+    print("Deployment not found")
+```
+
+---
+
+## Activate Deployment
+
+Set a specific deployment as the live (active) version for a workflow. This deactivates any previously active deployment.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<ParamField path="deployment_id" type="string" required>
+  UUID of the deployment to activate.
+</ParamField>
+
+```python
+result = await client.deployments.activate(
+    workflow_id="wf-uuid-here",
+    deployment_id="dep-uuid-here",
+)
+
+print(f"Success: {result['success']}")
+print(f"Message: {result['message']}")
+print(f"Active deployment:   {result['deployment_id']}")
+print(f"Previous deployment: {result.get('previous_live_deployment_id', 'None')}")
+```
+
+---
+
+## Deactivate Live Deployment
+
+Remove the live status from the current deployment, leaving the workflow with no active deployment.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<Warning>
+  After deactivation, the workflow has no live deployment. New executions via scheduled runs or production integrations pointing to the live deployment will fail until a deployment is re-activated.
+</Warning>
+
+```python
+result = await client.deployments.deactivate(workflow_id="wf-uuid-here")
+print(f"Success: {result['success']}")
+print(f"Previous live: {result.get('previous_live_deployment_id', 'None')}")
+```
+
+---
+
+## Delete Deployment
+
+Permanently delete a specific deployment version.
+
+<ParamField path="workflow_id" type="string" required>
+  UUID of the workflow.
+</ParamField>
+
+<ParamField path="deployment_id" type="string" required>
+  UUID of the deployment to delete.
+</ParamField>
+
+<Warning>
+  If you delete the currently live deployment, the workflow will have no active deployment. A `new_live_deployment_id` may be assigned automatically if the platform promotes another version.
+</Warning>
+
+```python
+from modulex import NotFoundError
+
+try:
+    result = await client.deployments.delete(
+        workflow_id="wf-uuid-here",
+        deployment_id="dep-uuid-here",
+    )
+    print(f"Deleted: {result['deleted_deployment_id']}")
+    print(f"Was live: {result['was_live']}")
+    if result.get("new_live_deployment_id"):
+        print(f"New live: {result['new_live_deployment_id']}")
+except NotFoundError:
+    print("Deployment not found")
+```

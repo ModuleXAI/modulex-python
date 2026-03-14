@@ -1,0 +1,296 @@
+---
+title: "Schedules"
+description: "Automate workflow execution on a fixed interval or cron expression"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## Create Schedule
+
+Schedules execute a workflow automatically. Choose `"interval"` for fixed time gaps or `"cron"` for calendar-based timing.
+
+<ParamField body="workflow_id" type="string" required>
+  UUID of the workflow to schedule.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Display name for the schedule (1–255 characters).
+</ParamField>
+
+<ParamField body="schedule_type" type="string" required>
+  Either `"interval"` or `"cron"`.
+</ParamField>
+
+<ParamField body="interval_seconds" type="integer" conditional>
+  Required when `schedule_type` is `"interval"`. Minimum: `60` seconds.
+</ParamField>
+
+<ParamField body="cron_expression" type="string" conditional>
+  Required when `schedule_type` is `"cron"`. Standard cron syntax (e.g., `"0 9 * * 1-5"`).
+</ParamField>
+
+<ParamField body="timezone" type="string" optional>
+  Timezone for cron evaluation. Default: `"UTC"`. Use `client.system.timezones()` to see valid values.
+</ParamField>
+
+<ParamField body="input" type="object" optional>
+  Static input passed to the workflow on each run.
+</ParamField>
+
+### Interval Schedule
+
+```python
+from modulex import ValidationError
+
+try:
+    schedule = await client.schedules.create(
+        workflow_id="wf-uuid-here",
+        name="Hourly Data Sync",
+        description="Syncs CRM data every hour",
+        schedule_type="interval",
+        interval_seconds=3600,  # 1 hour — minimum is 60 seconds
+        timezone="UTC",
+        input={
+            "sync_type": "incremental",
+            "source": "salesforce",
+        },
+        config={},
+    )
+    print(f"Schedule ID: {schedule['id']}")
+    print(f"Active:      {schedule['is_active']}")
+    print(f"Next run:    {schedule.get('next_run_at')}")
+except ValidationError as e:
+    print(f"Invalid schedule: {e.message}")
+```
+
+### Cron Schedule
+
+```python
+# Weekdays at 9:00 AM Eastern
+schedule = await client.schedules.create(
+    workflow_id="wf-uuid-here",
+    name="Daily Morning Report",
+    description="Sends the daily sales briefing at 9 AM ET",
+    schedule_type="cron",
+    cron_expression="0 9 * * 1-5",
+    timezone="America/New_York",
+    input={
+        "report_type": "daily_summary",
+        "recipients": ["leadership@acme.com"],
+    },
+)
+print(f"Cron: {schedule['cron_expression']} ({schedule['timezone']})")
+
+# First of every month at midnight UTC
+monthly = await client.schedules.create(
+    workflow_id="wf-uuid-here",
+    name="Monthly Invoice Processing",
+    schedule_type="cron",
+    cron_expression="0 0 1 * *",
+    timezone="UTC",
+)
+```
+
+---
+
+## List Schedules
+
+<ParamField query="workflow_id" type="string" optional>
+  Filter schedules for a specific workflow.
+</ParamField>
+
+<ParamField query="is_active" type="boolean" optional>
+  Filter by active (`True`) or paused (`False`) status.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Items to return (1–100). Default: `50`.
+</ParamField>
+
+```python
+# All schedules for the organization
+result = await client.schedules.list()
+for schedule in result["schedules"]:
+    status = "active" if schedule["is_active"] else "paused"
+    print(f"  {schedule['name']} [{status}] — next: {schedule.get('next_run_at')}")
+
+# Active schedules for a specific workflow
+active = await client.schedules.list(
+    workflow_id="wf-uuid-here",
+    is_active=True,
+)
+print(f"Active schedules: {len(active['schedules'])}")
+```
+
+---
+
+## Get Schedule
+
+```python
+from modulex import NotFoundError
+
+try:
+    schedule = await client.schedules.get("sched-uuid-here")
+    print(f"Name:     {schedule['name']}")
+    print(f"Type:     {schedule['schedule_type']}")
+    print(f"Active:   {schedule['is_active']}")
+    print(f"Next run: {schedule.get('next_run_at', 'N/A')}")
+    if schedule["schedule_type"] == "interval":
+        print(f"Interval: {schedule['interval_seconds']}s")
+    else:
+        print(f"Cron:     {schedule['cron_expression']} ({schedule['timezone']})")
+except NotFoundError:
+    print("Schedule not found")
+```
+
+---
+
+## Update Schedule
+
+All fields are optional — only provided fields are updated.
+
+```python
+updated = await client.schedules.update(
+    "sched-uuid-here",
+    name="Hourly Data Sync — Updated",
+    cron_expression="0 */2 * * *",  # Every 2 hours
+    timezone="Europe/London",
+    input={"sync_type": "full"},
+)
+print(f"Updated at: {updated['updated_at']}")
+```
+
+---
+
+## Delete Schedule
+
+```python
+await client.schedules.delete("sched-uuid-here")
+print("Schedule deleted")
+```
+
+---
+
+## Pause Schedule
+
+Temporarily stop a schedule from triggering without deleting it.
+
+```python
+result = await client.schedules.pause("sched-uuid-here")
+print(f"Paused: {result['is_active']}")   # False
+```
+
+---
+
+## Resume Schedule
+
+Re-enable a previously paused schedule.
+
+```python
+result = await client.schedules.resume("sched-uuid-here")
+print(f"Active:   {result['is_active']}")   # True
+print(f"Next run: {result.get('next_run_at')}")
+```
+
+---
+
+## List Schedule Runs
+
+Retrieve the execution history for a schedule.
+
+<ParamField query="status" type="string" optional>
+  Filter by run status: `"success"`, `"failed"`, `"running"`.
+</ParamField>
+
+<ParamField query="limit" type="integer" optional>
+  Runs to return (1–100). Default: `50`.
+</ParamField>
+
+```python
+result = await client.schedules.list_runs(
+    schedule_id="sched-uuid-here",
+    status="failed",
+    limit=20,
+)
+print(f"Failed runs: {len(result['runs'])}")
+for run in result["runs"]:
+    print(f"  {run['started_at']} — {run['status']} — {run.get('duration_ms')}ms")
+    if run.get("error"):
+        print(f"    Error: {run['error']}")
+```
+
+---
+
+## Run Statistics
+
+Retrieve aggregate statistics for a schedule over a time window.
+
+<ParamField query="days" type="integer" optional>
+  Number of days to analyze (1–90). Default: `7`.
+</ParamField>
+
+```python
+stats = await client.schedules.run_stats("sched-uuid-here", days=30)
+print(f"Total runs:       {stats['total_runs']}")
+print(f"Successful:       {stats['successful_runs']}")
+print(f"Failed:           {stats['failed_runs']}")
+success_rate = stats["successful_runs"] / stats["total_runs"] * 100 if stats["total_runs"] else 0
+print(f"Success rate:     {success_rate:.1f}%")
+print(f"Avg duration:     {stats['average_duration_ms']}ms")
+```
+
+---
+
+## Get Single Run
+
+Retrieve details for a specific schedule run.
+
+```python
+run = await client.schedules.get_run(
+    schedule_id="sched-uuid-here",
+    run_id="run-uuid-here",
+)
+print(f"Status:    {run['status']}")
+print(f"Started:   {run['started_at']}")
+print(f"Duration:  {run.get('duration_ms')}ms")
+```
+
+---
+
+## Retry Failed Run
+
+Manually retry a failed schedule run.
+
+```python
+from modulex import BadRequestError
+
+try:
+    result = await client.schedules.retry_run(
+        schedule_id="sched-uuid-here",
+        run_id="run-uuid-here",
+    )
+    print(f"Retry run ID: {result.get('new_run_id')}")
+except BadRequestError as e:
+    print(f"Cannot retry: {e.message}")
+```
+
+<Tip>
+  Use `run_stats()` to monitor schedule health. A success rate below 90% warrants investigation of the workflow configuration or input data.
+</Tip>

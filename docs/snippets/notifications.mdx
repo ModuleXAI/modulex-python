@@ -1,0 +1,121 @@
+---
+title: "Notifications"
+description: "Retrieve and create in-app notifications for users and organization members"
+---
+
+## Installation
+
+```bash
+pip install modulex
+```
+
+## Initialize Client
+
+```python
+from modulex import Modulex
+
+client = Modulex(
+    api_key="mx_live_...",
+    organization_id="your-org-id",
+)
+```
+
+---
+
+## List Notifications
+
+Retrieve notifications for the authenticated user. Pass an `organization_id` (via the client or per-request) to include organization-specific notifications.
+
+```python
+# Personal notifications only (no org context)
+personal_client = Modulex(api_key="mx_live_...")
+result = await personal_client.notifications.list()
+
+print(f"Total notifications: {result['total']}")
+print(f"Org context:         {result.get('organization_id', 'None')}")
+
+for notification in result["notifications"]:
+    print(f"\n  [{notification.get('notification_topic')}] {notification.get('message')[:80]}")
+    print(f"  Created: {notification.get('created_at')}")
+    if notification.get("notification_url"):
+        print(f"  Link:    {notification['notification_url']}")
+    if notification.get("expires_at"):
+        print(f"  Expires: {notification['expires_at']}")
+
+# Organization-scoped notifications
+org_result = await client.notifications.list()
+print(f"\nOrg notifications ({client._organization_id}): {org_result['total']}")
+```
+
+<Note>
+  When the client has an `organization_id` configured, notifications will include both personal and organization-level notifications for that org.
+</Note>
+
+---
+
+## Create Notification
+
+Send a notification to organization members. Supports broadcast (all members) or targeted (single user) delivery.
+
+<ParamField body="notification_topic" type="string" required>
+  Topic category: `"integration"` or `"attention"`.
+</ParamField>
+
+<ParamField body="message" type="string" required>
+  Notification message content (1–5000 characters).
+</ParamField>
+
+<ParamField body="notified_to" type="string" optional>
+  UUID of a specific user to notify. If omitted, the notification is broadcast to all organization members.
+</ParamField>
+
+<ParamField body="notification_url" type="string" optional>
+  Deep-link URL that the notification should point to (max 500 characters).
+</ParamField>
+
+<ParamField body="expires_at" type="string" optional>
+  ISO 8601 datetime after which the notification is no longer displayed.
+</ParamField>
+
+### Broadcast Notification
+
+```python
+from modulex import ValidationError
+
+try:
+    result = await client.notifications.create(
+        notification_topic="attention",
+        message=(
+            "Scheduled maintenance window tonight 11 PM – 1 AM UTC. "
+            "Workflow executions may be paused during this time."
+        ),
+        notification_url="https://status.acme.com/incidents/maint-2026-03",
+        expires_at="2026-03-10T01:00:00Z",
+    )
+    print(f"Broadcast sent: {result.get('success')}")
+    print(f"Notification ID: {result.get('id')}")
+
+except ValidationError as e:
+    print(f"Invalid notification: {e.message}")
+```
+
+### Targeted Notification
+
+```python
+# Notify a specific user about a credential issue
+result = await client.notifications.create(
+    notification_topic="integration",
+    message=(
+        "Your OpenAI credential 'Production Key' is expiring in 7 days. "
+        "Please update it to avoid workflow disruptions."
+    ),
+    notified_to="user-uuid-here",
+    notification_url="https://app.modulex.dev/credentials/cred-uuid-here",
+    expires_at="2026-03-16T00:00:00Z",
+)
+print(f"Targeted notification sent to user: {result.get('notified_to')}")
+```
+
+<Tip>
+  Use `notification_topic="integration"` for credential and tool-related alerts, and `"attention"` for general announcements, maintenance windows, or urgent platform notices.
+</Tip>
