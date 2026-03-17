@@ -370,13 +370,13 @@ except ModulexError as e:
 All types are available for import:
 
 ```python
+from modulex import SSEEvent
 from modulex.types import (
     WorkflowDefinition,
     NodeDefinition,
     EdgeDefinition,
     LLMConfig,
     RunResponse,
-    SSEEvent,
 )
 ```
 
