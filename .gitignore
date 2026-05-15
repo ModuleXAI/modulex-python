@@ -28,3 +28,7 @@ coverage/
 PUBLISHING_GUIDE.md
 SDK_PROMPT_PYTHON.md
 SDK_REFERENCE.md
+
+# modulex-meta orchestration state (local-only for public repos)
+.mxmeta/
+.claude/
