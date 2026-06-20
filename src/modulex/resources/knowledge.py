@@ -8,6 +8,18 @@ import os
 from typing import Any
 
 from modulex._base import _BaseResource
+from modulex.types.knowledge import (
+    ContextResponse,
+    DocumentChunksResponse,
+    DocumentResponse,
+    DocumentStatusResponse,
+    HybridSearchResult,
+    KnowledgeBaseResponse,
+    KnowledgeStatsResponse,
+    MultiSearchResult,
+    SearchResult,
+    SupportedFileTypesResponse,
+)
 
 
 class Knowledge(_BaseResource):
@@ -20,12 +32,13 @@ class Knowledge(_BaseResource):
         limit: int = 100,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> builtins.list[KnowledgeBaseResponse]:
         """Return all knowledge bases accessible to the caller."""
         params: dict[str, Any] = {
             k: v for k, v in {"status": status, "limit": limit, "offset": offset}.items() if v is not None
         }
-        return await self._get("/knowledge-bases", params=params, organization_id=organization_id)
+        data = await self._get("/knowledge-bases", params=params, organization_id=organization_id)
+        return [KnowledgeBaseResponse.model_validate(item) for item in data]
 
     async def create(
         self,
@@ -35,7 +48,7 @@ class Knowledge(_BaseResource):
         embedding_config: dict[str, Any] | None = None,
         chunking_config: dict[str, Any] | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> KnowledgeBaseResponse:
         """Create a new knowledge base with the given name and optional configuration."""
         body: dict[str, Any] = {
             k: v
@@ -47,16 +60,20 @@ class Knowledge(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post("/knowledge-bases", json=body, organization_id=organization_id)
+        return KnowledgeBaseResponse.model_validate(
+            await self._post("/knowledge-bases", json=body, organization_id=organization_id)
+        )
 
     async def get(
         self,
         knowledge_base_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> KnowledgeBaseResponse:
         """Return a single knowledge base by its ID."""
-        return await self._get(f"/knowledge-bases/{knowledge_base_id}", organization_id=organization_id)
+        return KnowledgeBaseResponse.model_validate(
+            await self._get(f"/knowledge-bases/{knowledge_base_id}", organization_id=organization_id)
+        )
 
     async def update(
         self,
@@ -64,13 +81,15 @@ class Knowledge(_BaseResource):
         *,
         organization_id: str | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> KnowledgeBaseResponse:
         """Update an existing knowledge base with the provided field values."""
         body: dict[str, Any] = {k: v for k, v in kwargs.items() if v is not None}
-        return await self._put(
-            f"/knowledge-bases/{knowledge_base_id}",
-            json=body,
-            organization_id=organization_id,
+        return KnowledgeBaseResponse.model_validate(
+            await self._put(
+                f"/knowledge-bases/{knowledge_base_id}",
+                json=body,
+                organization_id=organization_id,
+            )
         )
 
     async def delete(
@@ -93,16 +112,20 @@ class Knowledge(_BaseResource):
         knowledge_base_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> KnowledgeBaseResponse:
         """Archive a knowledge base, making it read-only."""
-        return await self._post(
-            f"/knowledge-bases/{knowledge_base_id}/archive",
-            organization_id=organization_id,
+        return KnowledgeBaseResponse.model_validate(
+            await self._post(
+                f"/knowledge-bases/{knowledge_base_id}/archive",
+                organization_id=organization_id,
+            )
         )
 
-    async def stats(self, *, organization_id: str | None = None) -> Any:
+    async def stats(self, *, organization_id: str | None = None) -> KnowledgeStatsResponse:
         """Return aggregate statistics for all knowledge bases in the organization."""
-        return await self._get("/knowledge-bases/stats", organization_id=organization_id)
+        return KnowledgeStatsResponse.model_validate(
+            await self._get("/knowledge-bases/stats", organization_id=organization_id)
+        )
 
     async def list_documents(
         self,
@@ -112,16 +135,17 @@ class Knowledge(_BaseResource):
         limit: int = 100,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> builtins.list[DocumentResponse]:
         """Return all documents within a knowledge base."""
         params: dict[str, Any] = {
             k: v for k, v in {"status": status, "limit": limit, "offset": offset}.items() if v is not None
         }
-        return await self._get(
+        data = await self._get(
             f"/knowledge-bases/{knowledge_base_id}/documents",
             params=params,
             organization_id=organization_id,
         )
+        return [DocumentResponse.model_validate(item) for item in data]
 
     async def upload_document(
         self,
@@ -132,7 +156,7 @@ class Knowledge(_BaseResource):
         filename: str | None = None,
         metadata: dict[str, Any] | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DocumentResponse:
         """Upload a document to a knowledge base via multipart form data."""
         if file_path is not None:
             f = open(file_path, "rb")
@@ -148,12 +172,14 @@ class Knowledge(_BaseResource):
             data["metadata"] = json_module.dumps(metadata)
 
         try:
-            return await self._upload(
-                f"/knowledge-bases/{knowledge_base_id}/documents",
-                file=f,
-                filename=fn,
-                data=data if data else None,
-                organization_id=organization_id,
+            return DocumentResponse.model_validate(
+                await self._upload(
+                    f"/knowledge-bases/{knowledge_base_id}/documents",
+                    file=f,
+                    filename=fn,
+                    data=data if data else None,
+                    organization_id=organization_id,
+                )
             )
         finally:
             if file_path is not None:
@@ -165,11 +191,13 @@ class Knowledge(_BaseResource):
         document_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DocumentResponse:
         """Return a single document within a knowledge base by its ID."""
-        return await self._get(
-            f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}",
-            organization_id=organization_id,
+        return DocumentResponse.model_validate(
+            await self._get(
+                f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}",
+                organization_id=organization_id,
+            )
         )
 
     async def document_status(
@@ -178,11 +206,13 @@ class Knowledge(_BaseResource):
         document_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DocumentStatusResponse:
         """Return the processing status of a document."""
-        return await self._get(
-            f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/status",
-            organization_id=organization_id,
+        return DocumentStatusResponse.model_validate(
+            await self._get(
+                f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/status",
+                organization_id=organization_id,
+            )
         )
 
     async def delete_document(
@@ -207,11 +237,13 @@ class Knowledge(_BaseResource):
         document_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DocumentResponse:
         """Retry processing for a failed document."""
-        return await self._post(
-            f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/retry",
-            organization_id=organization_id,
+        return DocumentResponse.model_validate(
+            await self._post(
+                f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/retry",
+                organization_id=organization_id,
+            )
         )
 
     async def document_chunks(
@@ -222,13 +254,15 @@ class Knowledge(_BaseResource):
         limit: int = 100,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DocumentChunksResponse:
         """Return the text chunks produced from a document after processing."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
-        return await self._get(
-            f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/chunks",
-            params=params,
-            organization_id=organization_id,
+        return DocumentChunksResponse.model_validate(
+            await self._get(
+                f"/knowledge-bases/{knowledge_base_id}/documents/{document_id}/chunks",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def search(
@@ -242,7 +276,7 @@ class Knowledge(_BaseResource):
         include_content: bool = True,
         include_metadata: bool = True,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> SearchResult:
         """Perform a semantic vector search against a knowledge base."""
         body: dict[str, Any] = {
             k: v
@@ -256,10 +290,12 @@ class Knowledge(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post(
-            f"/knowledge-bases/{knowledge_base_id}/search",
-            json=body,
-            organization_id=organization_id,
+        return SearchResult.model_validate(
+            await self._post(
+                f"/knowledge-bases/{knowledge_base_id}/search",
+                json=body,
+                organization_id=organization_id,
+            )
         )
 
     async def multi_search(
@@ -270,7 +306,7 @@ class Knowledge(_BaseResource):
         top_k: int = 5,
         min_score: float = 0.0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> MultiSearchResult:
         """Search across multiple knowledge bases in a single request."""
         body: dict[str, Any] = {
             k: v
@@ -282,7 +318,9 @@ class Knowledge(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post("/knowledge-bases/search", json=body, organization_id=organization_id)
+        return MultiSearchResult.model_validate(
+            await self._post("/knowledge-bases/search", json=body, organization_id=organization_id)
+        )
 
     async def hybrid_search(
         self,
@@ -295,7 +333,7 @@ class Knowledge(_BaseResource):
         min_score: float = 0.0,
         filters: dict[str, Any] | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> HybridSearchResult:
         """Perform a hybrid keyword-plus-semantic search against a knowledge base."""
         body: dict[str, Any] = {
             k: v
@@ -309,10 +347,12 @@ class Knowledge(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post(
-            f"/knowledge-bases/{knowledge_base_id}/hybrid-search",
-            json=body,
-            organization_id=organization_id,
+        return HybridSearchResult.model_validate(
+            await self._post(
+                f"/knowledge-bases/{knowledge_base_id}/hybrid-search",
+                json=body,
+                organization_id=organization_id,
+            )
         )
 
     async def retrieve_context(
@@ -324,7 +364,7 @@ class Knowledge(_BaseResource):
         top_k: int = 10,
         min_score: float = 0.3,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ContextResponse:
         """Retrieve a token-bounded context string suitable for LLM prompts."""
         body: dict[str, Any] = {
             "query": query,
@@ -332,12 +372,14 @@ class Knowledge(_BaseResource):
             "top_k": top_k,
             "min_score": min_score,
         }
-        return await self._post(
-            f"/knowledge-bases/{knowledge_base_id}/retrieve-context",
-            json=body,
-            organization_id=organization_id,
+        return ContextResponse.model_validate(
+            await self._post(
+                f"/knowledge-bases/{knowledge_base_id}/retrieve-context",
+                json=body,
+                organization_id=organization_id,
+            )
         )
 
-    async def supported_file_types(self) -> Any:
+    async def supported_file_types(self) -> SupportedFileTypesResponse:
         """Return the list of file types supported for document upload."""
-        return await self._get("/knowledge-bases/info/supported-file-types")
+        return SupportedFileTypesResponse.model_validate(await self._get("/knowledge-bases/info/supported-file-types"))

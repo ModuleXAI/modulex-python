@@ -12,9 +12,11 @@ from modulex import Modulex
 @pytest.mark.asyncio
 class TestKnowledge:
     async def test_list(self, client: Modulex, mock_api: respx.MockRouter) -> None:
-        mock_api.get("/knowledge-bases").mock(return_value=httpx.Response(200, json={"items": [], "total": 0}))
+        # Backend returns a bare JSON array (response_model=List[KnowledgeBaseResponse]).
+        mock_api.get("/knowledge-bases").mock(return_value=httpx.Response(200, json=[{"id": "kb-1", "name": "KB One"}]))
         result = await client.knowledge.list()
-        assert result["total"] == 0
+        assert len(result) == 1
+        assert result[0]["id"] == "kb-1"
 
     async def test_create(self, client: Modulex, mock_api: respx.MockRouter) -> None:
         mock_api.post("/knowledge-bases").mock(
@@ -107,11 +109,13 @@ class TestKnowledge:
         assert "pdf" in result["supported_types"]
 
     async def test_list_documents(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        # Backend returns a bare JSON array (response_model=List[DocumentResponse]).
         mock_api.get("/knowledge-bases/kb-123/documents").mock(
-            return_value=httpx.Response(200, json={"items": [], "total": 0})
+            return_value=httpx.Response(200, json=[{"id": "doc-1", "filename": "a.pdf"}])
         )
         result = await client.knowledge.list_documents("kb-123")
-        assert result["total"] == 0
+        assert len(result) == 1
+        assert result[0]["filename"] == "a.pdf"
 
     async def test_stats(self, client: Modulex, mock_api: respx.MockRouter) -> None:
         mock_api.get("/knowledge-bases/stats").mock(

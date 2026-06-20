@@ -113,43 +113,46 @@ result = await client.executions.run(
     workflow_id="workflow-uuid",
     input={"messages": [{"role": "user", "content": "Hello!"}]},
 )
+print(result.run_id)  # typed attribute access (responses are Pydantic models)
 
-# Direct LLM call
+# Safely retry a run without double-execution
 result = await client.executions.run(
-    llm={
-        "integration_name": "openai",
-        "provider_id": "openai",
-        "model_id": "gpt-4o-mini",
-        "temperature": 0.4,
-    },
-    input={"messages": [{"role": "user", "content": "Hello!"}]},
+    workflow_id="workflow-uuid",
+    input={"messages": [...]},
+    idempotency_key="order-4823",  # stable key across retries
 )
 
-# Get execution state
+# Get execution state / resume after interrupt / cancel
 state = await client.executions.get_state(thread_id="thread-uuid")
-
-# Resume after interrupt
-await client.executions.resume(
-    thread_id="thread-uuid",
-    run_id="run-uuid",
-    resume_value="user input",
-)
-
-# Cancel execution
+await client.executions.resume(thread_id="thread-uuid", run_id="run-uuid", resume_value="user input")
 await client.executions.cancel(run_id="run-uuid", reason="No longer needed")
+
+# Run history (workflow-runs)
+runs = await client.executions.list_runs(workflow_id="workflow-uuid", limit=50)
+async for run in client.executions.iter_runs(status="succeeded"):  # auto-paginates
+    print(run.run_id, run.status)
+detail = await client.executions.get_run(run_pk="run-row-id")
 ```
 
+> Agentic ("direct LLM") chat moved off `/workflows/run` — use `client.assistant.chat(...)` instead.
+
 ### SSE Streaming
+
+The backend carries the event type in the SSE `event:` field for `/chats/stream`, and in the JSON
+`data["type"]` for workflow/composer/assistant streams. The SDK normalizes both, so `event.event`
+always holds the logical type. Streams stop after a terminal event (`done`/`error`/`cancelled`/
+`interrupted`) and heartbeats are filtered by default.
 
 ```python
 # Listen to workflow execution events
 async for event in client.executions.listen(run_id="run-uuid"):
     if event.event == "node_update":
-        print(f"Node {event.data['node_id']}: {event.data['status']}")
-    elif event.event == "done":
-        print(f"Completed in {event.data['total_execution_time_ms']}ms")
-    elif event.event == "error":
-        print(f"Error: {event.data['error_message']}")
+        print(f"Node {event.data['node']}: {event.data.get('output')}")
+    elif event.event == "interrupt":
+        payload = event.data["data"]  # InterruptEventData is nested under data["data"]
+        print(f"Needs input: {payload.get('message')}")
+    elif event.is_terminal:
+        print(f"Stream ended: {event.event}")
 
 # Listen to chat list updates
 async for event in client.chats.stream():
@@ -237,20 +240,6 @@ runs = await client.schedules.list_runs(schedule["id"])
 stats = await client.schedules.run_stats(schedule["id"], days=30)
 ```
 
-### Templates
-
-```python
-# Browse templates
-templates = await client.templates.list()
-
-# Use a template
-result = await client.templates.use("template-id")
-print(f"Created workflow: {result['workflow']['id']}")
-
-# Like a template
-await client.templates.like("template-id")
-```
-
 ### Deployments
 
 ```python
@@ -269,23 +258,48 @@ await client.deployments.deactivate("workflow-uuid")
 
 ### Composer
 
+`llm` is a provider config dict ({integration_name, provider_id, model_id, credential_id?}) — pass a
+`ComposerLLMConfig` or an equivalent dict.
+
 ```python
-# Start a composer session
+from modulex.types import ComposerLLMConfig, YesNoResponse, user_input_request_from_event
+
 result = await client.composer.chat(
     message="Add an LLM node that summarizes the input",
     workflow_id="workflow-uuid",
-    llm={"integration_name": "anthropic", "model_id": "claude-sonnet-4-20250514"},
+    llm=ComposerLLMConfig(integration_name="anthropic", provider_id="anthropic", model_id="claude-sonnet-4-20250514"),
 )
 
-# Listen to composer events
-async for event in client.composer.listen(result["composer_chat_id"], result["run_id"]):
-    if event.event == "workflow_change":
-        print(f"Workflow modified: {event.data}")
-    elif event.event == "done":
+# Listen, and answer a human-in-the-loop question (HITL) when the run pauses
+async for event in client.composer.listen(result.composer_chat_id, result.run_id):
+    if event.event == "user_input_request":
+        question = user_input_request_from_event(event.data)  # typed UserInputRequest
+        await client.composer.resume(
+            result.composer_chat_id,
+            request_id=question.request_id,
+            response=YesNoResponse(answer=True),
+            llm={"integration_name": "anthropic", "provider_id": "anthropic", "model_id": "claude-sonnet-4-20250514"},
+        )  # returns a NEW run_id — re-subscribe with listen() on it
+    elif event.is_terminal:
         break
 
-# Save or revert changes
-await client.composer.save(result["composer_chat_id"])
+chats = await client.composer.list(limit=20)        # cursor-paginated
+await client.composer.save(result.composer_chat_id)  # or .revert(...)
+```
+
+### Assistant (agentic chat)
+
+Shares the HITL contract with the composer. All endpoints are available to any org member.
+
+```python
+result = await client.assistant.chat("Summarize my latest runs", llm=ComposerLLMConfig(
+    integration_name="openai", provider_id="openai", model_id="gpt-4o-mini",
+))
+async for event in client.assistant.listen(result.chat_id, result.run_id):
+    if event.event == "response_chunk":
+        print(event.data.get("data", {}).get("text", ""), end="")
+    elif event.is_terminal:
+        break
 ```
 
 ### Other Resources
@@ -338,13 +352,27 @@ try:
 except NotFoundError:
     print("Workflow not found")
 except RateLimitError as e:
-    print(f"Rate limited. Retry after {e.retry_after}s")
+    print(f"Rate limited. Retry after {e.retry_after}s (limit={e.limit}, remaining={e.remaining})")
 except AuthenticationError:
     print("Invalid API key")
 except ValidationError as e:
     print(f"Validation error: {e.message}")
 except ModulexError as e:
     print(f"API error ({e.status_code}): {e.message}")
+```
+
+Usage/billing denials (quota, credit, wallet) are surfaced structurally via `BillingError` and its
+subclasses, which expose `code`, `layer`, `key`, `current`, `limit`, and `reason`:
+
+```python
+from modulex import BillingError, CreditExhaustedError
+
+try:
+    await client.executions.run(workflow_id="wf")
+except CreditExhaustedError as e:           # 402, layer="credit"
+    print(f"Out of credits: {e.current}/{e.limit}")
+except BillingError as e:                   # any quota/credit/wallet denial
+    print(f"Denied ({e.layer}/{e.code}): {e.reason}")
 ```
 
 ### Exception Hierarchy
@@ -354,6 +382,7 @@ except ModulexError as e:
 | `ModulexError` | — | Base exception |
 | `BadRequestError` | 400 | Malformed request |
 | `AuthenticationError` | 401 | Invalid/missing auth |
+| `PaymentRequiredError` | 402 | Payment required (billing) |
 | `PermissionError` | 403 | Insufficient permissions |
 | `NotFoundError` | 404 | Resource not found |
 | `ConflictError` | 409 | Resource conflict |
@@ -362,12 +391,18 @@ except ModulexError as e:
 | `InternalError` | 500 | Server error |
 | `ExternalServiceError` | 502 | External service failure |
 | `ServiceUnavailableError` | 503 | Service unavailable |
+| `BillingError` | 402/403/429 | Usage denial (base) — `code`/`layer`/`reason` |
+| `QuotaExceededError` | 403 | Quota exceeded (`layer="quota"`) |
+| `CreditExhaustedError` | 402 | Credit plan exhausted (`layer="credit"`) |
+| `WalletError` | 402 | Wallet overage denied (`layer="wallet"`) |
 | `StreamError` | — | SSE stream error |
 | `TimeoutError` | — | Request timeout |
 
 ## Type Hints
 
-All types are available for import:
+Responses are **Pydantic v2 models** — use typed attribute access (`result.id`) or, for
+compatibility, dict-style access (`result["id"]`). Unknown fields the backend may add are preserved.
+All models are importable:
 
 ```python
 from modulex import SSEEvent
@@ -377,6 +412,8 @@ from modulex.types import (
     EdgeDefinition,
     LLMConfig,
     RunResponse,
+    AsyncPage,        # typed auto-pagination (e.g. executions.iter_runs)
+    ModulexModel,     # base class for all response models
 )
 ```
 

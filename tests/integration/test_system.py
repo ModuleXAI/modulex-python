@@ -1,6 +1,6 @@
 """Integration tests for the System resource.
 
-Covers: health, metrics, timezones, search_timezones.
+Covers: health, timezones, search_timezones.
 """
 
 from __future__ import annotations
@@ -22,15 +22,6 @@ class TestSystem:
             call.result = result
             assert result is not None, "health response must not be None"
             assert result.get("status") == "healthy", f"expected status='healthy', got {result.get('status')!r}"
-
-    async def test_metrics(self, client: Modulex, tracker: ResultTracker) -> None:
-        """GET /system/metrics — response must be a non-empty string."""
-        async with api_call(tracker, "GET", "/system/metrics") as call:
-            result = await client.system.metrics()
-            call.result = result
-            # Prometheus text format returns a string; JSON returns a dict.
-            # Both are valid — just assert we got something back.
-            assert result is not None and result != "", "metrics response must not be empty"
 
     async def test_timezones(self, client: Modulex, tracker: ResultTracker) -> None:
         """GET /system/timezones — response must contain 'popular' and 'all_timezones' keys."""

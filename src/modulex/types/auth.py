@@ -1,62 +1,107 @@
-"""Auth-related type definitions."""
+"""Auth-related response models (Pydantic v2)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from typing_extensions import TypedDict
+from pydantic import Field
 
-
-class UserProfile(TypedDict, total=False):
-    """User profile from /auth/me."""
-
-    id: str
-    email: str
-    username: str
-    role: str
-    is_active: bool
-    organization_ids: list[str]
-    primary_organization_id: str | None
+from modulex.types._models import ModulexModel
 
 
-class OrganizationMembership(TypedDict, total=False):
-    """Organization membership info."""
+class UserProfile(ModulexModel):
+    """User profile from GET /auth/me."""
 
     id: str
-    name: str
-    slug: str
-    role: str
-    created_at: str
+    email: Optional[str] = None
+    username: Optional[str] = None
+    role: Optional[str] = None
+    is_active: bool = True
+    organization_ids: list[str] = Field(default_factory=list)
+    primary_organization_id: Optional[str] = None
 
 
-class UserOrganizationsResponse(TypedDict, total=False):
-    """Response from /auth/me/organizations."""
-
-    success: bool
-    user_id: str
-    organizations: list[OrganizationMembership]
-    total: int
-
-
-class InvitationInfo(TypedDict, total=False):
-    """Invitation details."""
+class OrganizationMembership(ModulexModel):
+    """An organization the user belongs to (GET /auth/me/organizations item)."""
 
     id: str
-    organization_id: str
-    organization_name: str
-    invited_email: str
-    role: str
-    status: str
-    invitation_message: str | None
-    created_at: str
-    expires_at: str | None
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+    role: Optional[str] = None
+    joined_at: Optional[str] = None
+    is_default: bool = False
 
 
-class LeaveOrganizationResponse(TypedDict, total=False):
-    """Response from /auth/organizations/leave."""
+class UserOrganizationsResponse(ModulexModel):
+    """Response from GET /auth/me/organizations."""
 
-    success: bool
-    message: str
-    left_organization: dict[str, Any]
-    remaining_organizations: list[dict[str, Any]]
-    total_remaining: int
+    success: bool = True
+    user_id: Optional[str] = None
+    organizations: list[OrganizationMembership] = Field(default_factory=list)
+    total: int = 0
+
+
+class InvitationOrganization(ModulexModel):
+    """Nested organization info inside an invitation."""
+
+    id: str
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    domain: Optional[str] = None
+
+
+class InvitedBy(ModulexModel):
+    """The user who sent an invitation."""
+
+    id: Optional[str] = None
+    email: Optional[str] = None
+    username: Optional[str] = None
+
+
+class InvitationInfo(ModulexModel):
+    """A pending invitation (GET /auth/invitations/my item)."""
+
+    id: str
+    organization: Optional[InvitationOrganization] = None
+    invited_by: Optional[InvitedBy] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    invitation_message: Optional[str] = None
+    days_until_expiry: Optional[int] = None
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+
+
+class InvitationsResponse(ModulexModel):
+    """Response from GET /auth/invitations/my."""
+
+    success: bool = True
+    invitations: list[InvitationInfo] = Field(default_factory=list)
+    total_count: int = 0
+
+
+class AcceptInvitationResponse(ModulexModel):
+    """Response from POST /auth/invitations/{id}/accept."""
+
+    success: bool = True
+    message: Optional[str] = None
+    organization: Optional[InvitationOrganization] = None
+    role: Optional[str] = None
+
+
+class RejectInvitationResponse(ModulexModel):
+    """Response from POST /auth/invitations/{id}/reject."""
+
+    success: bool = True
+    message: Optional[str] = None
+
+
+class LeaveOrganizationResponse(ModulexModel):
+    """Response from POST /auth/organizations/leave."""
+
+    success: bool = True
+    message: Optional[str] = None
+    left_organization: Optional[dict[str, Any]] = None
+    remaining_organizations: list[OrganizationMembership] = Field(default_factory=list)
+    total_remaining: int = 0

@@ -14,6 +14,7 @@ from modulex._exceptions import (
     raise_for_status,
 )
 from modulex._streaming import EventSourceStream
+from modulex._version import __version__
 
 if TYPE_CHECKING:
     from modulex._client import Modulex
@@ -31,15 +32,29 @@ class _BaseResource:
             return organization_id
         return self._client._config.organization_id
 
-    def _build_headers(self, organization_id: str | None = None) -> dict[str, str]:
-        """Build request headers with auth and optional org context."""
+    def _build_headers(
+        self,
+        organization_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, str]:
+        """Build request headers with auth and optional org context.
+
+        User-supplied ``default_headers`` may override the User-Agent but never
+        the auth or content-type headers. ``idempotency_key`` (for mutating
+        requests) is sent as the ``Idempotency-Key`` header so the backend can
+        de-duplicate retried side-effectful operations.
+        """
         headers: dict[str, str] = {
+            "User-Agent": f"modulex-python/{__version__}",
+            **self._client._config.default_headers,
             "Authorization": f"Bearer {self._client._config.api_key}",
             "Content-Type": "application/json",
         }
         org_id = self._resolve_org_id(organization_id)
         if org_id:
             headers["X-Organization-ID"] = org_id
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
         return headers
 
     def _should_retry(self, method: str, status_code: int, attempt: int) -> bool:
@@ -69,11 +84,12 @@ class _BaseResource:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
         organization_id: str | None = None,
+        idempotency_key: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """Execute an HTTP request with retry logic."""
         url = f"{self._client._config.base_url}{path}"
-        headers = self._build_headers(organization_id)
+        headers = self._build_headers(organization_id, idempotency_key)
 
         # Filter None values from params
         if params:
@@ -191,17 +207,27 @@ class _BaseResource:
         *,
         method: str = "GET",
         organization_id: str | None = None,
+        json: dict[str, Any] | None = None,
+        include_heartbeats: bool = False,
         **kwargs: Any,
     ) -> EventSourceStream:
-        """Create an SSE stream connection."""
+        """Create an SSE stream connection.
+
+        For POST streams (e.g. credentials bulk), pass ``json=`` — the JSON
+        Content-Type is kept; for GET streams it is dropped.
+        """
         url = f"{self._client._config.base_url}{path}"
         headers = self._build_headers(organization_id)
-        headers.pop("Content-Type", None)
+        if json is not None:
+            kwargs["json"] = json
+        else:
+            headers.pop("Content-Type", None)
         return EventSourceStream(
             self._client._http,
             method,
             url,
             headers=headers,
+            include_heartbeats=include_heartbeats,
             timeout=httpx.Timeout(self._client._config.timeout, read=None),
             **kwargs,
         )
@@ -237,6 +263,20 @@ class _BaseResource:
 
         return response.json()
 
+    @staticmethod
+    def _unwrap_page(result: Any, items_key: str) -> tuple[list[Any], dict[str, Any]]:
+        """Return (items, container) handling a nested ``data.<items_key>`` envelope.
+
+        e.g. dashboard/logs returns ``{success, data: {logs, total_count, has_next}}``.
+        """
+        if not isinstance(result, dict):
+            return [], {}
+        container = result
+        if items_key not in result and isinstance(result.get("data"), dict):
+            container = result["data"]
+        items = container.get(items_key, [])
+        return (items if isinstance(items, list) else []), container
+
     async def _paginate(
         self,
         path: str,
@@ -245,37 +285,92 @@ class _BaseResource:
         params: dict[str, Any] | None = None,
         organization_id: str | None = None,
         page_size: int = 20,
+        style: str | None = None,
+        total_key: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Auto-paginate through a list endpoint."""
+        """Auto-paginate a list endpoint across the backend's three styles.
+
+        Styles (auto-detected from ``params`` unless ``style`` is given):
+          - ``"page"``   — page / page_size, terminates on total_pages | has_more | short page
+          - ``"offset"`` — limit / offset, terminates on has_next | has_more | total/total_count | short page
+          - ``"cursor"`` — cursor / next_cursor (e.g. assistant & composer chat lists)
+        """
         params = dict(params or {})
 
-        # Detect pagination style
-        if "page" in params or "page_size" in params:
-            # Page-based pagination
+        if style is None:
+            if "cursor" in params:
+                style = "cursor"
+            elif "page" in params or "page_size" in params:
+                style = "page"
+            else:
+                style = "offset"
+
+        if style == "cursor":
+            cursor = params.pop("cursor", None)
+            while True:
+                if cursor is not None:
+                    params["cursor"] = cursor
+                result = await self._get(path, params=params, organization_id=organization_id, **kwargs)
+                items, container = self._unwrap_page(result, items_key)
+                for item in items:
+                    yield item
+                cursor = container.get("next_cursor")
+                if not cursor or not items:
+                    break
+
+        elif style == "page":
             page = params.pop("page", 1)
             params["page_size"] = params.pop("page_size", page_size)
             while True:
                 params["page"] = page
                 result = await self._get(path, params=params, organization_id=organization_id, **kwargs)
-                items = result.get(items_key, [])
+                items, container = self._unwrap_page(result, items_key)
                 for item in items:
                     yield item
-                total_pages = result.get("total_pages", 1)
-                if page >= total_pages:
+                total_pages = container.get("total_pages")
+                has_more = container.get("has_more")
+                if total_pages is not None:
+                    if page >= total_pages:
+                        break
+                elif has_more is not None:
+                    if not has_more:
+                        break
+                elif len(items) < params["page_size"] or not items:
                     break
                 page += 1
-        else:
-            # Limit/offset pagination
+
+        else:  # offset
             offset = params.pop("offset", 0)
             limit = params.pop("limit", page_size)
             params["limit"] = limit
             while True:
                 params["offset"] = offset
                 result = await self._get(path, params=params, organization_id=organization_id, **kwargs)
-                items = result.get(items_key, [])
+                items, container = self._unwrap_page(result, items_key)
                 for item in items:
                     yield item
-                if not result.get("has_next", False) or len(items) < limit:
+                if not items:
                     break
+                if container.get("has_next") is not None:
+                    if not container["has_next"]:
+                        break
+                elif container.get("has_more") is not None:
+                    if not container["has_more"]:
+                        break
+                else:
+                    total = (
+                        container.get(total_key)
+                        if total_key
+                        else (
+                            container.get("total")
+                            if container.get("total") is not None
+                            else container.get("total_count")
+                        )
+                    )
+                    if total is not None:
+                        if offset + len(items) >= total:
+                            break
+                    elif len(items) < limit:
+                        break
                 offset += limit

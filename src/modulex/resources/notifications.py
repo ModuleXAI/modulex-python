@@ -5,14 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from modulex._base import _BaseResource
+from modulex.types.notifications import (
+    CreateOrganizationNotificationResponse,
+    NotificationResponse,
+)
 
 
 class Notifications(_BaseResource):
     """Resource for listing and creating organization notifications."""
 
-    async def list(self, *, organization_id: str | None = None) -> Any:
+    async def list(self, *, organization_id: str | None = None) -> NotificationResponse:
         """Return all notifications for the organization."""
-        return await self._get("/notifications", organization_id=organization_id)
+        return NotificationResponse.model_validate(await self._get("/notifications", organization_id=organization_id))
 
     async def create(
         self,
@@ -23,7 +27,7 @@ class Notifications(_BaseResource):
         notification_url: str | None = None,
         expires_at: str | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> CreateOrganizationNotificationResponse:
         """Create and dispatch a new notification to the organization."""
         body: dict[str, Any] = {
             k: v
@@ -36,4 +40,6 @@ class Notifications(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post("/notifications/organization", json=body, organization_id=organization_id)
+        return CreateOrganizationNotificationResponse.model_validate(
+            await self._post("/notifications/organization", json=body, organization_id=organization_id)
+        )

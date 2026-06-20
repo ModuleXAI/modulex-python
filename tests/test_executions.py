@@ -48,26 +48,69 @@ class TestExecutions:
         )
         assert result["workflow_source"] == "request"
 
-    async def test_run_with_llm(self, client: Modulex, mock_api: respx.MockRouter) -> None:
-        mock_api.post("/workflows/run").mock(
+    async def test_run_with_attribution_workflow_id(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.post("/workflows/run").mock(
+            return_value=httpx.Response(200, json={"status": "running", "run_id": "run-789"})
+        )
+        await client.executions.run(
+            workflow={"nodes": [], "edges": []},
+            attribution_workflow_id="wf-attr",
+            input={},
+        )
+        import json as _json
+
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent["attribution_workflow_id"] == "wf-attr"
+        # llm / knowledge_config are no longer part of the run body
+        assert "llm" not in sent
+        assert "knowledge_config" not in sent
+
+    async def test_run_no_longer_accepts_llm(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        with pytest.raises(TypeError):
+            await client.executions.run(llm={"x": 1})  # type: ignore[call-arg]
+
+    async def test_run_sends_idempotency_key_header(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.post("/workflows/run").mock(
+            return_value=httpx.Response(200, json={"status": "running", "run_id": "run-1"})
+        )
+        await client.executions.run(workflow_id="wf-1", idempotency_key="idem-abc")
+        assert route.calls.last.request.headers["Idempotency-Key"] == "idem-abc"
+
+    async def test_list_runs(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.get("/workflow-runs").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "status": "running",
-                    "run_id": "run-789",
-                    "workflow_source": "llm",
+                    "runs": [{"id": "r1", "run_id": "run-1", "status": "succeeded"}],
+                    "has_more": False,
+                    "limit": 50,
+                    "offset": 0,
                 },
             )
         )
-        result = await client.executions.run(
-            llm={
-                "integration_name": "openai",
-                "provider_id": "openai",
-                "model_id": "gpt-4o-mini",
-            },
-            input={"messages": [{"role": "user", "content": "Hi"}]},
+        result = await client.executions.list_runs(workflow_id="wf-1", status="succeeded")
+        assert result["runs"][0]["id"] == "r1"
+        assert route.calls.last.request.url.params["workflow_id"] == "wf-1"
+        assert route.calls.last.request.url.params["status"] == "succeeded"
+
+    async def test_iter_runs_autopaginate(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        mock_api.get("/workflow-runs").mock(
+            side_effect=[
+                httpx.Response(
+                    200, json={"runs": [{"id": "r1"}, {"id": "r2"}], "has_more": True, "limit": 2, "offset": 0}
+                ),
+                httpx.Response(200, json={"runs": [{"id": "r3"}], "has_more": False, "limit": 2, "offset": 2}),
+            ]
         )
-        assert result["workflow_source"] == "llm"
+        ids = [r["id"] async for r in client.executions.iter_runs(page_size=2)]
+        assert ids == ["r1", "r2", "r3"]
+
+    async def test_get_run(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        mock_api.get("/workflow-runs/r-pk").mock(
+            return_value=httpx.Response(200, json={"id": "r-pk", "run_id": "run-1", "status": "succeeded"})
+        )
+        result = await client.executions.get_run("r-pk")
+        assert result["id"] == "r-pk"
 
     async def test_run_with_system_workflow(self, client: Modulex, mock_api: respx.MockRouter) -> None:
         mock_api.post("/workflows/run").mock(

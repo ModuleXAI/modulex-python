@@ -107,3 +107,98 @@ class TestErrorHandling:
         mock_api.get("/auth/me").mock(return_value=httpx.Response(500, text="Internal Server Error"))
         with pytest.raises(InternalError):
             await client.auth.me()
+
+    async def test_429_rate_limit_headers(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        mock_api.get("/auth/me").mock(
+            return_value=httpx.Response(
+                429,
+                json={"detail": "API key rate limit exceeded"},
+                headers={
+                    "Retry-After": "5",
+                    "X-RateLimit-Limit": "100",
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": "1718800000",
+                },
+            )
+        )
+        with pytest.raises(RateLimitError) as exc_info:
+            await client.auth.me()
+        assert exc_info.value.retry_after == 5.0
+        assert exc_info.value.limit == 100
+        assert exc_info.value.remaining == 0
+        assert exc_info.value.reset == 1718800000.0
+
+
+@pytest.mark.asyncio
+class TestBillingErrors:
+    """402/403/429 structured usage-denial envelope: {code, layer, key, current, limit, reason}."""
+
+    async def test_402_payment_required_plain(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        from modulex import PaymentRequiredError
+
+        mock_api.get("/auth/me").mock(return_value=httpx.Response(402, json={"detail": "Payment required"}))
+        with pytest.raises(PaymentRequiredError) as exc_info:
+            await client.auth.me()
+        assert exc_info.value.status_code == 402
+
+    async def test_402_credit_envelope(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        from modulex import CreditExhaustedError
+
+        mock_api.get("/workflows").mock(
+            return_value=httpx.Response(
+                402,
+                json={
+                    "code": "credit_plan_exhausted",
+                    "layer": "credit",
+                    "key": "monthly_credits",
+                    "current": 1000,
+                    "limit": 1000,
+                    "reason": "credit_exhausted",
+                },
+            )
+        )
+        with pytest.raises(CreditExhaustedError) as exc_info:
+            await client.workflows.list()
+        err = exc_info.value
+        assert err.code == "credit_plan_exhausted"
+        assert err.layer == "credit"
+        assert err.current == 1000
+        assert err.limit == 1000
+        assert err.reason == "credit_exhausted"
+
+    async def test_403_quota_envelope_is_billing_not_permission(
+        self, client: Modulex, mock_api: respx.MockRouter
+    ) -> None:
+        from modulex import QuotaExceededError
+
+        mock_api.get("/workflows").mock(
+            return_value=httpx.Response(
+                403,
+                json={"code": "quota_exceeded", "layer": "quota", "reason": "quota_exceeded"},
+            )
+        )
+        with pytest.raises(QuotaExceededError) as exc_info:
+            await client.workflows.list()
+        assert exc_info.value.layer == "quota"
+
+    async def test_403_plain_is_still_permission_error(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        # No envelope keys -> regular PermissionError, not a billing error.
+        mock_api.get("/workflows").mock(return_value=httpx.Response(403, json={"detail": "Forbidden"}))
+        with pytest.raises(PermissionError):
+            await client.workflows.list()
+
+    async def test_429_billing_envelope_wrapped_in_detail(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        from modulex import BillingError
+
+        # org-member limiter returns a dict detail envelope
+        mock_api.get("/workflows").mock(
+            return_value=httpx.Response(
+                429,
+                json={"detail": {"code": "rate_limit_exceeded", "layer": "rate", "reason": "rate_limit_exceeded"}},
+                headers={"Retry-After": "10"},
+            )
+        )
+        with pytest.raises(BillingError) as exc_info:
+            await client.workflows.list()
+        assert exc_info.value.layer == "rate"
+        assert exc_info.value.retry_after == 10.0

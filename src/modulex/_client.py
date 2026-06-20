@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import httpx
@@ -10,6 +11,7 @@ from modulex._config import DEFAULT_BASE_URL, DEFAULT_MAX_RETRIES, DEFAULT_TIMEO
 
 if TYPE_CHECKING:
     from modulex.resources.api_keys import ApiKeys
+    from modulex.resources.assistant import Assistant
     from modulex.resources.auth import Auth
     from modulex.resources.chats import Chats
     from modulex.resources.composer import Composer
@@ -24,12 +26,14 @@ if TYPE_CHECKING:
     from modulex.resources.schedules import Schedules
     from modulex.resources.subscriptions import Subscriptions
     from modulex.resources.system import System
-    from modulex.resources.templates import Templates
     from modulex.resources.workflows import Workflows
 
 
 class Modulex:
     """Async client for the ModuleX API.
+
+    Configuration falls back to environment variables when arguments are omitted:
+    ``MODULEX_API_KEY``, ``MODULEX_BASE_URL``, ``MODULEX_ORGANIZATION_ID``.
 
     Usage:
         async with Modulex(api_key="mx_live_...") as client:
@@ -38,19 +42,27 @@ class Modulex:
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str | None = None,
         *,
         organization_id: str | None = None,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
+        api_key = api_key or os.environ.get("MODULEX_API_KEY")
+        if not api_key:
+            raise ValueError("api_key is required: pass api_key=... or set the MODULEX_API_KEY environment variable")
+        base_url = base_url or os.environ.get("MODULEX_BASE_URL") or DEFAULT_BASE_URL
+        organization_id = organization_id or os.environ.get("MODULEX_ORGANIZATION_ID")
+
         self._config = ClientConfig(
             api_key=api_key,
             organization_id=organization_id,
             base_url=base_url,
             timeout=timeout,
             max_retries=max_retries,
+            default_headers=default_headers or {},
         )
         self._http = httpx.AsyncClient()
 
@@ -64,8 +76,8 @@ class Modulex:
         self._integrations: object | None = None
         self._knowledge: object | None = None
         self._schedules: object | None = None
-        self._templates: object | None = None
         self._composer: object | None = None
+        self._assistant: object | None = None
         self._dashboard: object | None = None
         self._subscriptions: object | None = None
         self._notifications: object | None = None
@@ -165,15 +177,6 @@ class Modulex:
         return self._schedules  # type: ignore[return-value]
 
     @property
-    def templates(self) -> Templates:
-        """Access template endpoints."""
-        if self._templates is None:
-            from modulex.resources.templates import Templates
-
-            self._templates = Templates(self)
-        return self._templates  # type: ignore[return-value]
-
-    @property
     def composer(self) -> Composer:
         """Access composer endpoints."""
         if self._composer is None:
@@ -181,6 +184,15 @@ class Modulex:
 
             self._composer = Composer(self)
         return self._composer  # type: ignore[return-value]
+
+    @property
+    def assistant(self) -> Assistant:
+        """Access assistant (agentic chat) endpoints."""
+        if self._assistant is None:
+            from modulex.resources.assistant import Assistant
+
+            self._assistant = Assistant(self)
+        return self._assistant  # type: ignore[return-value]
 
     @property
     def dashboard(self) -> Dashboard:

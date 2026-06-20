@@ -5,6 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from modulex._base import _BaseResource
+from modulex.types.schedules import (
+    DeleteScheduleResponse,
+    RetryRunResponse,
+    ScheduleListResponse,
+    ScheduleResponse,
+    ScheduleRunResponse,
+    ScheduleRunsResponse,
+    ScheduleStatsResponse,
+)
 
 
 class Schedules(_BaseResource):
@@ -23,7 +32,7 @@ class Schedules(_BaseResource):
         input: dict[str, Any] | None = None,
         config: dict[str, Any] | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleResponse:
         """Create a new schedule that triggers a workflow on a defined cadence."""
         body: dict[str, Any] = {
             k: v
@@ -40,7 +49,9 @@ class Schedules(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._post("/schedules", json=body, organization_id=organization_id)
+        return ScheduleResponse.model_validate(
+            await self._post("/schedules", json=body, organization_id=organization_id)
+        )
 
     async def list(
         self,
@@ -50,7 +61,7 @@ class Schedules(_BaseResource):
         limit: int = 50,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleListResponse:
         """Return all schedules, optionally filtered by workflow or active status."""
         params: dict[str, Any] = {
             k: v
@@ -62,16 +73,20 @@ class Schedules(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._get("/schedules", params=params, organization_id=organization_id)
+        return ScheduleListResponse.model_validate(
+            await self._get("/schedules", params=params, organization_id=organization_id)
+        )
 
     async def get(
         self,
         schedule_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleResponse:
         """Return a single schedule by its ID."""
-        return await self._get(f"/schedules/{schedule_id}", organization_id=organization_id)
+        return ScheduleResponse.model_validate(
+            await self._get(f"/schedules/{schedule_id}", organization_id=organization_id)
+        )
 
     async def update(
         self,
@@ -79,37 +94,45 @@ class Schedules(_BaseResource):
         *,
         organization_id: str | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> ScheduleResponse:
         """Update an existing schedule with the provided field values."""
         body: dict[str, Any] = {k: v for k, v in kwargs.items() if v is not None}
-        return await self._put(f"/schedules/{schedule_id}", json=body, organization_id=organization_id)
+        return ScheduleResponse.model_validate(
+            await self._put(f"/schedules/{schedule_id}", json=body, organization_id=organization_id)
+        )
 
     async def delete(
         self,
         schedule_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> DeleteScheduleResponse:
         """Delete a schedule permanently by its ID."""
-        return await self._delete(f"/schedules/{schedule_id}", organization_id=organization_id)
+        return DeleteScheduleResponse.model_validate(
+            await self._delete(f"/schedules/{schedule_id}", organization_id=organization_id)
+        )
 
     async def pause(
         self,
         schedule_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleResponse:
         """Pause an active schedule so it no longer triggers new runs."""
-        return await self._post(f"/schedules/{schedule_id}/pause", organization_id=organization_id)
+        return ScheduleResponse.model_validate(
+            await self._post(f"/schedules/{schedule_id}/pause", organization_id=organization_id)
+        )
 
     async def resume(
         self,
         schedule_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleResponse:
         """Resume a paused schedule so it resumes triggering runs."""
-        return await self._post(f"/schedules/{schedule_id}/resume", organization_id=organization_id)
+        return ScheduleResponse.model_validate(
+            await self._post(f"/schedules/{schedule_id}/resume", organization_id=organization_id)
+        )
 
     async def list_runs(
         self,
@@ -119,15 +142,17 @@ class Schedules(_BaseResource):
         limit: int = 50,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleRunsResponse:
         """Return execution runs for a schedule, optionally filtered by status."""
         params: dict[str, Any] = {
             k: v for k, v in {"status": status, "limit": limit, "offset": offset}.items() if v is not None
         }
-        return await self._get(
-            f"/schedules/{schedule_id}/runs",
-            params=params,
-            organization_id=organization_id,
+        return ScheduleRunsResponse.model_validate(
+            await self._get(
+                f"/schedules/{schedule_id}/runs",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def run_stats(
@@ -136,13 +161,15 @@ class Schedules(_BaseResource):
         *,
         days: int = 7,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleStatsResponse:
         """Return aggregated run statistics for a schedule over the given number of days."""
         params: dict[str, Any] = {"days": days}
-        return await self._get(
-            f"/schedules/{schedule_id}/runs/stats",
-            params=params,
-            organization_id=organization_id,
+        return ScheduleStatsResponse.model_validate(
+            await self._get(
+                f"/schedules/{schedule_id}/runs/stats",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def get_run(
@@ -151,11 +178,13 @@ class Schedules(_BaseResource):
         run_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> ScheduleRunResponse:
         """Return a single run record for a schedule by run ID."""
-        return await self._get(
-            f"/schedules/{schedule_id}/runs/{run_id}",
-            organization_id=organization_id,
+        return ScheduleRunResponse.model_validate(
+            await self._get(
+                f"/schedules/{schedule_id}/runs/{run_id}",
+                organization_id=organization_id,
+            )
         )
 
     async def retry_run(
@@ -164,9 +193,11 @@ class Schedules(_BaseResource):
         run_id: str,
         *,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> RetryRunResponse:
         """Retry a failed schedule run by its ID."""
-        return await self._post(
-            f"/schedules/{schedule_id}/runs/{run_id}/retry",
-            organization_id=organization_id,
+        return RetryRunResponse.model_validate(
+            await self._post(
+                f"/schedules/{schedule_id}/runs/{run_id}/retry",
+                organization_id=organization_id,
+            )
         )

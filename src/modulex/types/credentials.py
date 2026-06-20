@@ -1,79 +1,120 @@
-"""Credential-related type definitions."""
+"""Credential-related response models (Pydantic v2)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from typing_extensions import TypedDict
+from pydantic import Field
 
-
-class CredentialResponse(TypedDict, total=False):
-    """Response representing a stored credential."""
-
-    credential_id: str
-    integration_name: str
-    integration_type: str
-    display_name: str
-    auth_type: str
-    is_default: bool
-    created_at: str
-    updated_at: str
-    last_used_at: str | None
-    expires_at: str | None
+from modulex.types._models import ModulexModel
 
 
-class CredentialTestResult(TypedDict, total=False):
-    """Result from testing a credential."""
+class CredentialResponse(ModulexModel):
+    """A stored credential (non-sensitive view)."""
 
     credential_id: str
-    is_valid: bool
-    message: str
-    tested_at: str
-    test_method: str
-    integration_name: str
-    auth_type: str
-    test_endpoint: str | None
-    status_code: int | None
-    cost_level: str | None
+    integration_name: Optional[str] = None
+    integration_type: Optional[str] = None
+    display_name: Optional[str] = None
+    auth_type: Optional[str] = None
+    is_default: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    credentials_metadata: Optional[dict[str, Any]] = None
 
 
-class CredentialUsageStats(TypedDict, total=False):
-    """Aggregated usage statistics for a credential."""
+class CredentialDetailResponse(CredentialResponse):
+    """A stored credential with admin/detail fields (GET /credentials/{id})."""
+
+    organization_id: Optional[str] = None
+    created_by: Optional[str] = None
+    created_by_email: Optional[str] = None
+    auth_data_masked: Optional[str] = None
+
+
+class MCPServerCredentialResponse(ModulexModel):
+    """Response from POST /credentials/mcp-server."""
 
     credential_id: str
-    total_calls: int
-    successful_calls: int
-    failed_calls: int
-    success_rate: float
-    action_breakdown: dict[str, Any]
-    start_date: str
-    end_date: str
+    integration_name: Optional[str] = None
+    display_name: Optional[str] = None
+    auth_type: Optional[str] = None
+    is_default: bool = False
+    created_at: Optional[str] = None
+    credentials_metadata: Optional[dict[str, Any]] = None
 
 
-class AuditEntry(TypedDict, total=False):
-    """Single audit log entry for a credential action."""
+class OAuth2InitiateResponse(ModulexModel):
+    """Response from POST /credentials/oauth2/initiate."""
+
+    authorization_url: Optional[str] = None
+    state: Optional[str] = None
+
+
+class CredentialTestResult(ModulexModel):
+    """Result from testing an existing credential (POST /credentials/{id}/test)."""
+
+    credential_id: Optional[str] = None
+    is_valid: bool = False
+    message: Optional[str] = None
+    tested_at: Optional[str] = None
+
+
+class TestTemporaryCredentialResponse(ModulexModel):
+    """Result from testing a credential without persisting it (POST /credentials/test-temporary)."""
+
+    is_valid: bool = False
+    message: Optional[str] = None
+    tested_at: Optional[str] = None
+    test_method: Optional[str] = None
+    integration_name: Optional[str] = None
+    auth_type: Optional[str] = None
+    test_endpoint: Optional[str] = None
+    status_code: Optional[int] = None
+    cost_level: Optional[str] = None
+
+
+class CredentialUsageStats(ModulexModel):
+    """Aggregated usage statistics for a credential (GET /credentials/{id}/usage)."""
+
+    credential_id: Optional[str] = None
+    total_calls: int = 0
+    successful_calls: int = 0
+    failed_calls: int = 0
+    success_rate: float = 0.0
+    action_breakdown: dict[str, int] = Field(default_factory=dict)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+class AuditEntry(ModulexModel):
+    """A single audit log entry for a credential (GET /credentials/{id}/audit item)."""
 
     id: str
-    credential_id: str
-    action: str
-    performed_by: str
-    timestamp: str
-    details: dict[str, Any]
+    credential_id: Optional[str] = None
+    event_type: Optional[str] = None
+    user_id: Optional[str] = None
+    changes: Optional[dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
-class MCPToolsResponse(TypedDict, total=False):
-    """Response listing MCP tools available for a credential."""
+class MCPToolsResponse(ModulexModel):
+    """Response listing MCP tools available for a credential (GET /credentials/{id}/mcp-tools)."""
 
-    credential_id: str
-    tools: list[Any]
-    total_count: int
+    credential_id: Optional[str] = None
+    tools: list[Any] = Field(default_factory=list)
+    total_count: int = 0
 
 
-class MCPRefreshResponse(TypedDict, total=False):
-    """Response from refreshing MCP tools for a credential."""
+class MCPRefreshResponse(ModulexModel):
+    """Response from refreshing MCP tool discovery (POST /credentials/{id}/refresh-discovery)."""
 
-    credential_id: str
-    refreshed_at: str
-    changes: dict[str, Any]
-    total_tools: int
-    success: bool
+    credential_id: Optional[str] = None
+    refreshed_at: Optional[str] = None
+    changes: Optional[dict[str, Any]] = None
+    total_tools: int = 0
+    success: bool = False

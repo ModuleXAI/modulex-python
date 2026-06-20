@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from modulex._base import _BaseResource
+from modulex.types.dashboard import (
+    AnalyticsLLMUsageResponse,
+    AnalyticsOverviewResponse,
+    AnalyticsToolsResponse,
+    LogsResponse,
+    UserListResponse,
+)
 
 
 class Dashboard(_BaseResource):
@@ -20,7 +27,7 @@ class Dashboard(_BaseResource):
         start_date: str | None = None,
         end_date: str | None = None,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> LogsResponse:
         """Return activity logs for the organization with optional filters."""
         params: dict[str, Any] = {
             k: v
@@ -34,7 +41,9 @@ class Dashboard(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._get("/dashboard/logs", params=params, organization_id=organization_id)
+        return LogsResponse.model_validate(
+            await self._get("/dashboard/logs", params=params, organization_id=organization_id)
+        )
 
     async def analytics_overview(
         self,
@@ -42,13 +51,15 @@ class Dashboard(_BaseResource):
         limit: int = 20,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> AnalyticsOverviewResponse:
         """Return a high-level analytics overview for the organization."""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
-        return await self._get(
-            "/dashboard/analytics/overview",
-            params=params,
-            organization_id=organization_id,
+        return AnalyticsOverviewResponse.model_validate(
+            await self._get(
+                "/dashboard/analytics/overview",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def analytics_tools(
@@ -58,13 +69,15 @@ class Dashboard(_BaseResource):
         limit: int = 20,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> AnalyticsToolsResponse:
         """Return tool usage analytics for the organization over a given period."""
         params: dict[str, Any] = {"period": period, "limit": limit, "offset": offset}
-        return await self._get(
-            "/dashboard/analytics/tools",
-            params=params,
-            organization_id=organization_id,
+        return AnalyticsToolsResponse.model_validate(
+            await self._get(
+                "/dashboard/analytics/tools",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def analytics_llm_usage(
@@ -74,13 +87,15 @@ class Dashboard(_BaseResource):
         limit: int = 20,
         offset: int = 0,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> AnalyticsLLMUsageResponse:
         """Return LLM token consumption analytics for the organization over a given period."""
         params: dict[str, Any] = {"period": period, "limit": limit, "offset": offset}
-        return await self._get(
-            "/dashboard/analytics/llm-usage",
-            params=params,
-            organization_id=organization_id,
+        return AnalyticsLLMUsageResponse.model_validate(
+            await self._get(
+                "/dashboard/analytics/llm-usage",
+                params=params,
+                organization_id=organization_id,
+            )
         )
 
     async def users(
@@ -93,7 +108,7 @@ class Dashboard(_BaseResource):
         page: int = 1,
         limit: int = 10,
         organization_id: str | None = None,
-    ) -> Any:
+    ) -> UserListResponse:
         """Return paginated users for the organization with optional search and sort."""
         params: dict[str, Any] = {
             k: v
@@ -107,4 +122,6 @@ class Dashboard(_BaseResource):
             }.items()
             if v is not None
         }
-        return await self._get("/dashboard/users", params=params, organization_id=organization_id)
+        return UserListResponse.model_validate(
+            await self._get("/dashboard/users", params=params, organization_id=organization_id)
+        )

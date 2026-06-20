@@ -1,104 +1,135 @@
-"""Execution-related type definitions."""
+"""Execution / workflow-run response models (Pydantic v2)."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from typing_extensions import TypedDict
+from pydantic import Field
 
-
-class RunResponse(TypedDict, total=False):
-    """Response from /workflows/run."""
-
-    status: str
-    run_id: str
-    thread_id: str
-    chat_id: str | None
-    ephemeral: bool
-    stream: bool
-    workflow_name: str
-    workflow_version: str
-    workflow_source: str
-    elapsed_ms: float
-    human_message: dict[str, Any]
-    ai_message: dict[str, Any]
-    message: str
+from modulex.types._models import ModulexModel
 
 
-class StateResponse(TypedDict, total=False):
-    """Response from /workflows/state/{thread_id}."""
+class RunResponse(ModulexModel):
+    """Response from POST /workflows/run."""
 
-    thread_id: str
-    run_id: str
-    checkpoint_id: str
-    state: dict[str, Any]
-    next: list[str]
-    metadata: dict[str, Any]
-    pending_writes: int
-
-
-class ResumeResponse(TypedDict, total=False):
-    """Response from /workflows/resume/{thread_id}."""
-
-    status: str
-    run_id: str
-    thread_id: str
-    stream: bool
-    workflow_source: str
-    message: str
+    status: Optional[str] = None
+    run_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    chat_id: Optional[str] = None
+    ephemeral: bool = False
+    stream: bool = False
+    workflow_name: Optional[str] = None
+    workflow_version: Optional[str] = None
+    workflow_source: Optional[str] = None
+    elapsed_ms: Optional[float] = None
+    human_message: Optional[dict[str, Any]] = None
+    ai_message: Optional[dict[str, Any]] = None
+    message: Optional[str] = None
 
 
-class CancelResponse(TypedDict, total=False):
-    """Response from /workflows/cancel/{run_id}."""
+class StateResponse(ModulexModel):
+    """Response from GET /workflows/state/{thread_id}."""
 
-    status: str
-    run_id: str
-    reason: str
-    message: str
-
-
-class NodeUpdateEvent(TypedDict, total=False):
-    """SSE node_update event data."""
-
-    node_id: str
-    node_type: str
-    status: str
-    output: dict[str, Any]
-    error: str | None
-    execution_time_ms: float
+    thread_id: Optional[str] = None
+    run_id: Optional[str] = None
+    checkpoint_id: Optional[str] = None
+    state: Optional[dict[str, Any]] = None
+    next: list[Any] = Field(default_factory=list)
+    metadata: Optional[dict[str, Any]] = None
+    pending_writes: int = 0
 
 
-class MetadataEvent(TypedDict, total=False):
-    """SSE metadata event data."""
+class ResumeResponse(ModulexModel):
+    """Response from POST /workflows/resume/{thread_id}."""
 
-    run_id: str
-    thread_id: str
-    workflow_name: str
-    workflow_version: str
-    nodes: list[dict[str, Any]]
-
-
-class InterruptEvent(TypedDict, total=False):
-    """SSE interrupt event data."""
-
-    message: str
-    state: dict[str, Any]
-    resume_instructions: str
-    node_id: str
+    status: Optional[str] = None
+    run_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    stream: bool = False
+    workflow_source: Optional[str] = None
+    message: Optional[str] = None
 
 
-class DoneEvent(TypedDict, total=False):
-    """SSE done event data."""
+class CancelResponse(ModulexModel):
+    """Response from POST /workflows/cancel/{run_id}."""
 
-    final_state: dict[str, Any]
-    steps_executed: int
-    total_execution_time_ms: float
+    status: Optional[str] = None
+    run_id: Optional[str] = None
+    reason: Optional[str] = None
+    message: Optional[str] = None
 
 
-class ErrorEvent(TypedDict, total=False):
-    """SSE error event data."""
+class WorkflowRunListItem(ModulexModel):
+    """A preview-optimized workflow run row (GET /workflow-runs item)."""
 
-    error_message: str
-    error_type: str
-    node_id: str | None
-    stack_trace: str | None
+    id: str
+    run_id: Optional[str] = None
+    workflow_id: Optional[str] = None
+    trigger_type: Optional[str] = None
+    is_ad_hoc: bool = False
+    status: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    has_output: bool = False
+
+
+class WorkflowRunListResponse(ModulexModel):
+    """Response from GET /workflow-runs."""
+
+    runs: list[WorkflowRunListItem] = Field(default_factory=list)
+    has_more: bool = False
+    limit: int = 0
+    offset: int = 0
+
+
+class WorkflowRunDetail(ModulexModel):
+    """A single workflow run's full record (GET /workflow-runs/{run_pk})."""
+
+    id: str
+    run_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    workflow_id: Optional[str] = None
+    trigger_type: Optional[str] = None
+    is_ad_hoc: bool = False
+    status: Optional[str] = None
+    user_id: Optional[str] = None
+    api_key_id: Optional[str] = None
+    schedule_id: Optional[str] = None
+    composer_chat_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    chat_id: Optional[str] = None
+    deployment_id: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    error_message: Optional[str] = None
+    input_snapshot: Optional[Any] = None
+    output_summary: Optional[Any] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# SSE workflow run events (NOT returned by any method; listen() yields raw
+# SSEEvent objects). The backend's "design" Pydantic models and its runtime
+# emission disagree on payload shape, so these are intentionally tolerant
+# (all fields Optional, extra="allow") and are never bound to a return type.
+# ---------------------------------------------------------------------------
+
+
+class WorkflowRunEvent(ModulexModel):
+    """Tolerant base for any workflow run SSE event payload (``data['type']``)."""
+
+    type: Optional[str] = None
+    run_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    node: Optional[str] = None
+    name: Optional[str] = None
+    output: Optional[Any] = None
+    data: Optional[Any] = None
+    message: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
