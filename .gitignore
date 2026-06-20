@@ -32,3 +32,11 @@ SDK_REFERENCE.md
 # modulex-meta orchestration state (local-only for public repos)
 .mxmeta/
 .claude/
+
+# local-only agent / audit / scratch files (must not be published)
+CLAUDE.md
+AGENTS.md
+.cursor/
+.agents/
+big-refactor-audit/
+.venv*/
