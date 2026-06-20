@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json as _json
+
 import httpx
 import pytest
 import respx
@@ -79,6 +81,26 @@ class TestWorkflows:
             status="draft",
         )
         assert result["id"] == "wf-new"
+
+    async def test_create_defaults_visibility_to_organization(
+        self, client: Modulex, mock_api: respx.MockRouter
+    ) -> None:
+        """New workflows now default to org-wide visibility (was ``private``)."""
+        route = mock_api.post("/workflows").mock(
+            return_value=httpx.Response(201, json={"id": "wf-new", "name": "New Workflow"})
+        )
+        await client.workflows.create(workflow_schema={"nodes": [], "edges": []})
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent["visibility"] == "organization"
+
+    async def test_create_accepts_private_visibility(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        """``private`` is still a valid value (one of the four kept enum values)."""
+        route = mock_api.post("/workflows").mock(
+            return_value=httpx.Response(201, json={"id": "wf-priv", "name": "Private WF"})
+        )
+        await client.workflows.create(workflow_schema={"nodes": [], "edges": []}, visibility="private")
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent["visibility"] == "private"
 
     async def test_update(self, client: Modulex, mock_api: respx.MockRouter) -> None:
         mock_api.put("/workflows/wf-123").mock(

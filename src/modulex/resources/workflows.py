@@ -28,12 +28,18 @@ class Workflows(_BaseResource):
         tags: list[str] | None = None,
         category: str | None = None,
         status: str = "draft",
-        visibility: str = "private",
+        visibility: str = "organization",
         input: dict[str, Any] | None = None,
         config: dict[str, Any] | None = None,
         organization_id: str | None = None,
     ) -> WorkflowResponse:
-        """Create a new workflow from the given schema and metadata."""
+        """Create a new workflow from the given schema and metadata.
+
+        ``visibility`` defaults to ``"organization"`` (visible org-wide). The
+        ``"private"`` value no longer restricts a workflow to its creator — it now
+        behaves like ``"organization"``. All four values remain accepted:
+        ``private | organization | public | system``.
+        """
         body: dict[str, Any] = {
             "workflow_schema": workflow_schema,
             "status": status,

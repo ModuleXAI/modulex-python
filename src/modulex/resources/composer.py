@@ -90,6 +90,10 @@ class Composer(_BaseResource):
         Event types are carried in ``event.event`` (normalized from ``data['type']``).
         A ``user_input_request`` event means the run paused for HITL input — answer
         it with :meth:`resume`. See :data:`modulex.types.realtime.COMPOSER_EVENT_TYPES`.
+
+        A 404 (``NotFoundError``) on connect means the chat/run was not found or is
+        not owned by your org — iterating the stream raises it rather than yielding
+        events (no reconnect loop, no existence leak).
         """
         return self._stream_sse(
             f"/composer/chat/{composer_chat_id}/listen/{run_id}",
@@ -112,6 +116,9 @@ class Composer(_BaseResource):
         ``llm`` is required in production (the executor rebuilds the chat model on
         resume); pass the same config used in :meth:`chat`. Returns a NEW ``run_id``;
         re-subscribe with :meth:`listen` on that run.
+
+        A 404 (``NotFoundError``) means the chat was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
         """
         body: dict[str, Any] = {
             "request_id": request_id,
@@ -221,7 +228,11 @@ class Composer(_BaseResource):
         *,
         organization_id: str | None = None,
     ) -> ComposerCancelResponse:
-        """Cancel an in-progress composer chat run."""
+        """Cancel an in-progress composer chat run.
+
+        A 404 (``NotFoundError``) means the chat was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
+        """
         return ComposerCancelResponse.model_validate(
             await self._post(
                 f"/composer/chat/{composer_chat_id}/cancel",

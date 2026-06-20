@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from modulex import Modulex
-from modulex._exceptions import AuthenticationError
+from modulex._exceptions import AuthenticationError, NotFoundError
 from modulex._streaming import SSEEvent
 
 _SSE_HEADERS = {"content-type": "text/event-stream"}
@@ -86,3 +86,25 @@ class TestEventSourceNormalization:
         with pytest.raises(AuthenticationError):
             async for _ in client.executions.listen("run-1"):
                 pass
+
+    async def test_listen_ownership_404_raises_not_found(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        """A run not owned by your org returns 404 on connect → NotFoundError (no hang, no reconnect)."""
+        route = mock_api.get("/workflows/listen/run-x").mock(
+            return_value=httpx.Response(404, json={"detail": "Not found"})
+        )
+        with pytest.raises(NotFoundError):
+            async for _ in client.executions.listen("run-x"):
+                pass
+        assert route.call_count == 1  # NotFoundError, not a StreamError-driven reconnect loop
+
+    async def test_composer_listen_ownership_404_raises_not_found(
+        self, client: Modulex, mock_api: respx.MockRouter
+    ) -> None:
+        """Same ownership 404 contract holds for the composer/assistant listen family."""
+        route = mock_api.get("/composer/chat/chat-x/listen/run-x").mock(
+            return_value=httpx.Response(404, json={"detail": "Not found"})
+        )
+        with pytest.raises(NotFoundError):
+            async for _ in client.composer.listen("chat-x", "run-x"):
+                pass
+        assert route.call_count == 1

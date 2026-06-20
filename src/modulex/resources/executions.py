@@ -71,7 +71,11 @@ class Executions(_BaseResource):
         )
 
     async def get_state(self, thread_id: str, *, organization_id: str | None = None) -> StateResponse:
-        """Return the current state of a workflow thread."""
+        """Return the current state of a workflow thread.
+
+        A 404 (``NotFoundError``) means the thread was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
+        """
         return StateResponse.model_validate(
             await self._get(f"/workflows/state/{thread_id}", organization_id=organization_id)
         )
@@ -87,7 +91,11 @@ class Executions(_BaseResource):
         stream: bool = True,
         organization_id: str | None = None,
     ) -> ResumeResponse:
-        """Resume a paused workflow thread with the provided resume value."""
+        """Resume a paused workflow thread with the provided resume value.
+
+        A 404 (``NotFoundError``) means the thread was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
+        """
         body: dict[str, Any] = {
             "run_id": run_id,
             "resume_value": resume_value,
@@ -108,7 +116,11 @@ class Executions(_BaseResource):
         reason: str | None = None,
         organization_id: str | None = None,
     ) -> CancelResponse:
-        """Cancel an in-progress workflow run by its run ID."""
+        """Cancel an in-progress workflow run by its run ID.
+
+        A 404 (``NotFoundError``) means the run was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
+        """
         body: dict[str, Any] = {}
         if reason is not None:
             body["reason"] = reason
@@ -125,6 +137,10 @@ class Executions(_BaseResource):
 
         Event types are carried in ``event.event`` (normalized from ``data['type']``).
         See :data:`modulex.types.realtime.WORKFLOW_EVENT_TYPES`.
+
+        A 404 (``NotFoundError``) on connect means the run was not found or is not
+        owned by your org — iterating the stream raises it rather than yielding
+        events (no reconnect loop, no existence leak).
         """
         return self._stream_sse(f"/workflows/listen/{run_id}", organization_id=organization_id)
 

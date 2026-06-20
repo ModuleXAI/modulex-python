@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from modulex._base import _BaseResource
 from modulex.types.organizations import (
@@ -37,11 +37,16 @@ class Organizations(_BaseResource):
         self,
         invited_email: str,
         *,
-        role: str = "member",
+        role: Literal["admin"] = "admin",
         invitation_message: str | None = None,
         organization_id: str | None = None,
     ) -> InviteResponse:
-        """Send an invitation email to a user to join the organization."""
+        """Send an invitation email to a user to join the organization.
+
+        Orgs are owner/admin only: the creator is ``owner`` and every invited user
+        is ``admin``. ``role`` must be ``"admin"`` (the default) — the ``"member"``
+        role has been retired and the backend rejects it with HTTP 422.
+        """
         body: dict[str, Any] = {"invited_email": invited_email, "role": role}
         if invitation_message is not None:
             body["invitation_message"] = invitation_message
@@ -134,11 +139,15 @@ class Organizations(_BaseResource):
         self,
         org_id: str,
         user_id: str,
-        role: str,
+        role: Literal["admin"],
         *,
         organization_id: str | None = None,
     ) -> RoleUpdateResponse:
-        """Update the role of a user within an organization."""
+        """Update the role of a user within an organization.
+
+        ``role`` must be ``"admin"`` — the ``"member"`` role has been retired (orgs
+        are owner/admin only) and the backend rejects it with HTTP 422.
+        """
         return RoleUpdateResponse.model_validate(
             await self._put(
                 f"/organizations/{org_id}/users/{user_id}/role",

@@ -80,6 +80,10 @@ class Assistant(_BaseResource):
         Event types are carried in ``event.event`` (normalized from ``data['type']``).
         A ``user_input_request`` event means the run paused for HITL input — answer
         it with :meth:`resume`.
+
+        A 404 (``NotFoundError``) on connect means the chat/run was not found or is
+        not owned by your org — iterating the stream raises it rather than yielding
+        events (no reconnect loop, no existence leak).
         """
         return self._stream_sse(
             f"/assistant/chat/{chat_id}/listen/{run_id}",
@@ -99,6 +103,9 @@ class Assistant(_BaseResource):
 
         ``llm`` is required (the executor rebuilds the chat model on resume).
         Returns a NEW ``run_id``; re-subscribe with :meth:`listen` on that run.
+
+        A 404 (``NotFoundError``) means the chat was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
         """
         body: dict[str, Any] = {
             "request_id": request_id,
@@ -120,7 +127,11 @@ class Assistant(_BaseResource):
         )
 
     async def cancel(self, chat_id: str, *, organization_id: str | None = None) -> AssistantCancelResponse:
-        """Cancel a running assistant run (also clears any pending HITL question)."""
+        """Cancel a running assistant run (also clears any pending HITL question).
+
+        A 404 (``NotFoundError``) means the chat was not found or is not owned by
+        your org (identical 404 in both cases — no existence leak).
+        """
         return AssistantCancelResponse.model_validate(
             await self._post(f"/assistant/chat/{chat_id}/cancel", organization_id=organization_id)
         )

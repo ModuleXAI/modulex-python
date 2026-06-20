@@ -52,3 +52,33 @@ class TestOrganizationSettings:
             "model_id": "gpt-4o-mini",
             "credential_id": "cred-1",
         }
+
+
+@pytest.mark.asyncio
+class TestOrganizationRoles:
+    """Org membership is owner/admin only — the ``member`` role was retired."""
+
+    async def test_invite_defaults_to_admin(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.post("/organizations/invite").mock(
+            return_value=httpx.Response(200, json={"success": True, "invitation": {"id": "inv-1", "role": "admin"}})
+        )
+        await client.organizations.invite("newuser@example.com")
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent["invited_email"] == "newuser@example.com"
+        assert sent["role"] == "admin"  # default is admin, never the retired "member"
+
+    async def test_invite_sends_admin_role(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.post("/organizations/invite").mock(return_value=httpx.Response(200, json={"success": True}))
+        await client.organizations.invite("newuser@example.com", role="admin", invitation_message="welcome")
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent["role"] == "admin"
+        assert sent["invitation_message"] == "welcome"
+
+    async def test_update_user_role_sends_admin(self, client: Modulex, mock_api: respx.MockRouter) -> None:
+        route = mock_api.put("/organizations/org-1/users/user-1/role").mock(
+            return_value=httpx.Response(200, json={"success": True, "new_role": "admin"})
+        )
+        result = await client.organizations.update_user_role("org-1", "user-1", "admin")
+        sent = _json.loads(route.calls.last.request.content)
+        assert sent == {"role": "admin"}
+        assert result["new_role"] == "admin"
